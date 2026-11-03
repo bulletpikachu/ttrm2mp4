@@ -1,0 +1,12 @@
+const {app,BrowserWindow,powerSaveBlocker}=require('electron');
+app.setPath('userData',require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'replay-electron-')));
+app.commandLine.appendSwitch('use-angle','metal');
+if(process.env.REPLAY_CHROMIUM_SOFTWARE==='1')app.commandLine.appendSwitch('disable-gpu');
+if(process.env.REPLAY_V8_FLAGS)app.commandLine.appendSwitch('js-flags',process.env.REPLAY_V8_FLAGS);
+app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+powerSaveBlocker.start('prevent-app-suspension');
+app.whenReady().then(()=>{global.renderWindow=new BrowserWindow({show:false,width:1920,height:1080,useContentSize:true,webPreferences:{nodeIntegration:true,contextIsolation:false,sandbox:false,backgroundThrottling:false}});renderWindow.loadURL('about:blank')});
+app.on('window-all-closed',()=>app.quit());

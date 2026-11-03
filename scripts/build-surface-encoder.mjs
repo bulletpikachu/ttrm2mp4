@@ -1,0 +1,13 @@
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {access} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+if(process.platform!=='darwin')throw Error('The IOSurface encoder requires macOS');
+const root=fileURLToPath(new URL('../',import.meta.url));
+const include=process.env.REPLAY_NODE_HEADERS||path.resolve(path.dirname(process.execPath),'../include/node');
+await access(path.join(include,'node_api.h'));
+const args=['clang++','-O3','-std=c++17','-dynamiclib','-undefined','dynamic_lookup','-I',include];
+for(const f of ['IOSurface','CoreFoundation','CoreVideo','CoreMedia','VideoToolbox'])args.push('-framework',f);
+args.push(path.join(root,'src/experimental/native/surface-encoder.mm'),'-o',path.join(root,'src/experimental/native/surface-encoder.node'));
+const child=spawn('xcrun',args,{stdio:'inherit'});const[code]=await once(child,'exit');if(code!==0)throw Error('Native encoder build failed');

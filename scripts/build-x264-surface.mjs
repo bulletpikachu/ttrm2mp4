@@ -1,0 +1,15 @@
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {access} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {readFile} from 'node:fs/promises';
+if(process.platform!=='darwin')throw Error('The IOSurface encoder requires macOS');
+const root=fileURLToPath(new URL('../',import.meta.url));
+const include=process.env.REPLAY_NODE_HEADERS||path.resolve(path.dirname(process.execPath),'../include/node');
+const x264=process.env.REPLAY_X264_SOURCE||path.join(root,'.native-deps/x264');
+await access(path.join(include,'node_api.h'));await access(path.join(x264,'libx264.a'));
+const config=await readFile(path.join(x264,'config.mak'),'utf8');
+const buildFlags=[`-DREPLAY_X264_BUILD_LTO=${config.includes('-flto')?1:0}`,`-DREPLAY_X264_BUILD_NATIVE=${config.includes('-mcpu=native')?1:0}`];
+const child=spawn('xcrun',['clang++','-O3','-std=c++17',...buildFlags,'-dynamiclib','-undefined','dynamic_lookup','-I',include,'-I',x264,'-framework','IOSurface','-framework','CoreFoundation',path.join(root,'src/experimental/native/x264-surface-encoder.mm'),path.join(x264,'libx264.a'),'-o',path.join(root,'src/experimental/native/x264-surface-encoder.node')],{stdio:'inherit'});
+const[code]=await once(child,'exit');if(code!==0)throw Error('Native x264 encoder build failed');

@@ -1,0 +1,10 @@
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import './generate-gl-commands.mjs';
+if(process.platform!=='darwin')throw Error('ANGLE IOSurface export currently requires macOS');
+const root=fileURLToPath(new URL('../',import.meta.url));
+const include=process.env.REPLAY_NODE_HEADERS||path.resolve(path.dirname(process.execPath),'../include/node');
+const child=spawn('xcrun',['clang++','-O3','-std=c++17','-dynamiclib','-undefined','dynamic_lookup','-I',include,'-I',path.join(root,'node_modules/@onirenaud/node-webgl/angle/include'),'-framework','IOSurface','-framework','CoreFoundation','-framework','CoreVideo','-framework','Metal','-framework','Foundation',path.join(root,'src/experimental/native/angle-surface.mm'),'-o',path.join(root,'src/experimental/native/angle-surface.node')],{stdio:'inherit'});
+const[code]=await once(child,'exit');if(code!==0)throw Error('ANGLE surface bridge build failed');

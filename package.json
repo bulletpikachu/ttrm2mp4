@@ -1,0 +1,28 @@
+{
+  "name": "replay-render",
+  "version": "1.0.0",
+  "description": "Render .ttrm replays to MP4 using TETR.IO’s native WebGL player",
+  "scripts": {
+    "render": "node src/render.mjs",
+    "render-fast": "node src/render-fast.mjs",
+    "check": "node --check src/render.mjs",
+    "prepare-client": "node src/prepare.mjs",
+    "prepare-native": "node scripts/prepare-native.mjs",
+    "prepare-fast": "node scripts/prepare-fast.mjs",
+    "render-parallel": "node src/render-parallel.mjs",
+    "render-native-parallel": "node src/render-native-parallel.mjs"
+  },
+  "type": "module",
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "playwright-core": "^1.64.1"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@onirenaud/node-webgl": "0.2.0",
+    "electron": "^45.2.1"
+  }
+}

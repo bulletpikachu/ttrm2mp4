@@ -1,0 +1,11 @@
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {access} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+if(process.platform!=='darwin')throw Error('The IOSurface probe requires macOS');
+const root=fileURLToPath(new URL('../',import.meta.url));
+const include=process.env.REPLAY_NODE_HEADERS||path.resolve(path.dirname(process.execPath),'../include/node');
+await access(path.join(include,'node_api.h'));
+const child=spawn('xcrun',['clang++','-std=c++17','-dynamiclib','-undefined','dynamic_lookup','-I',include,'-framework','IOSurface','-framework','CoreFoundation',path.join(root,'src/experimental/native/surface-planes.mm'),'-o',path.join(root,'src/experimental/native/surface-planes.node')],{stdio:'inherit'});
+const[code]=await once(child,'exit');if(code!==0)throw Error('Native probe build failed');

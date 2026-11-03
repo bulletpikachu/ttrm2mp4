@@ -1,0 +1,34 @@
+# Installed dependencies and compiled native modules
+node_modules/
+.native-deps/
+*.node
+*.o
+*.a
+*.dylib
+*.so
+*.dll
+
+# Downloaded TETR.IO client, assets, and installers
+/client/
+*.dmg
+
+# Local replay inputs
+*.ttrm
+*.ttr
+
+# Rendered media, benchmark reports, and diagnostic captures
+/output/
+/*-rounds/
+/output.json
+/*-offline.json
+/*-progressive.json
+*.mp4
+*.webm
+.inspect/
+.replay-render-*/
+
+# Local machine settings and secrets
+.DS_Store
+.env
+.env.*
+!.env.example
