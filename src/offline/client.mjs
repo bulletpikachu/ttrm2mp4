@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import {patchAudioOnlyParticles} from './audio-particles.mjs';
 
-export function patchClient(source) {
+export function patchClient(source,{audioOnlyParticles=false}={}) {
   function replace(needle, replacement) {
     if (source.split(needle).length !== 2) throw Error(`Pinned client patch mismatch: ${needle.slice(0, 80)}`);
     source = source.replace(needle, replacement);
@@ -17,10 +18,10 @@ export function patchClient(source) {
   replace('await d(t);const u=await e.decodeAudioData(s.get(t).slice(0));','await d(t);const u=window.__offlineDecodedBgm?.get(t)??await e.decodeAudioData(s.get(t).slice(0));');
   replace('BgmLoadFile:d,BgmSetVolume:', 'BgmLoadFile:d,BgmPreloadDecoded:async t=>{await d(t);const buffers=window.__offlineDecodedBgm??=new Map;if(!buffers.has(t))buffers.set(t,await e.decodeAudioData(s.get(t).slice(0)))},BgmSetVolume:');
   replace('i||document.body.classList.contains("banstatus_restrict")||lr.connect()', 'void 0');
-  return source;
+  return audioOnlyParticles?patchAudioOnlyParticles(source):source;
 }
 
-export async function attachLocalClient(context, directory) {
+export async function createLocalClientStore(directory, options={}) {
   const manifest = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
   if (manifest.format !== 1) throw Error('Unsupported local client format. Run npm run prepare-client -- replay.ttrm.');
   const entries = new Map(Object.entries(manifest.entries));
@@ -38,18 +39,36 @@ export async function attachLocalClient(context, directory) {
     }
     return bodies.get(entry.hash);
   }
-  await context.route('**/*', async route => {
-    const req = route.request(), url = new URL(req.url());
-    const key = `${req.method()} ${url.href}`;
-    const entry = entries.get(key) || byPath.get(`${req.method()} ${url.origin}${url.pathname}`);
-    if (!entry) { missing.add(key); await route.abort('internetdisconnected'); return; }
-    let bytes = await body(entry);
-    if (url.pathname === '/js/tetrio.js') bytes = Buffer.from(patchClient(bytes.toString('utf8')));
-    await route.fulfill({ status: entry.status, headers: { 'content-type': entry.type, 'access-control-allow-origin': '*' }, body: bytes });
-  });
+  return {manifest,missing,async response(method,address){
+    const url=new URL(address),key=`${method} ${url.href}`;
+    const entry=entries.get(key)||byPath.get(`${method} ${url.origin}${url.pathname}`);
+    if(!entry){missing.add(key);return null;}
+    let bytes=await body(entry);
+    if(url.pathname==='/js/tetrio.js')bytes=Buffer.from(patchClient(bytes.toString('utf8'),options));
+    return{status:entry.status,headers:{'content-type':entry.type,'access-control-allow-origin':'*'},body:bytes};
+  }};
+}
+
+export async function attachLocalClient(context, directory, options={}, electronApp=null) {
+  let cache;
+  if(electronApp){
+    const manifest=await electronApp.evaluate(async(_,config)=>global.__replayInstallLocalClient(config),{directory,options});
+    const missing=new Set();
+    cache={manifest,missing,transport:'electron-protocol',async refresh(){
+      const keys=await electronApp.evaluate(()=>global.__replayLocalClientMissing());
+      for(const key of keys)missing.add(key);
+    }};
+  }else{
+    cache=await createLocalClientStore(directory,options);cache.transport='playwright-route';
+    await context.route('**/*', async route => {
+      const req=route.request(),response=await cache.response(req.method(),req.url());
+      if(!response){await route.abort('internetdisconnected');return;}
+      await route.fulfill(response);
+    });
+  }
   await context.routeWebSocket('**/*', ws => ws.close());
   // Stronger than a request allowlist: Chromium's network itself is offline.
-  // Fulfilled routes are still available, while any accidental request fails.
+  // Cached routes/protocol responses remain available; accidental requests fail.
   await context.setOffline(true);
-  return { manifest, missing };
+  return cache;
 }

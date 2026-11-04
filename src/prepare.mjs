@@ -3,13 +3,20 @@ import { chromium } from 'playwright-core';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { parseArgs } from 'node:util';
 import { patchClient } from './offline/client.mjs';
+const {values:options,positionals}=parseArgs({allowPositionals:true,options:{chrome:{type:'string'},software:{type:'boolean'},help:{type:'boolean'}}});
+const usage='Usage: npm run prepare-client -- replay.ttrm [--chrome PATH] [--software]';
+if(options.help){console.log(usage);process.exit(0)}
+if(positionals.length!==1)throw Error(usage);
+const replay=JSON.parse(await readFile(path.resolve(positionals[0]),'utf8'));
+if(!replay.replay?.rounds?.length)throw Error('Expected a multiplayer .ttrm replay');
 const bundle = path.resolve('client');
 await mkdir(path.join(bundle, 'objects'), { recursive: true });
 const manifest = { format: 1, created: new Date().toISOString(), entries: {} };
 let pending = new Set();
 let page;
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required', ...(process.platform === 'darwin' ? ['--use-angle=metal'] : [])] });
+const browser = await chromium.launch({ ...(options.chrome?{executablePath:path.resolve(options.chrome)}:{channel:'chrome'}), headless: true, args: ['--autoplay-policy=no-user-gesture-required', ...(options.software?['--enable-unsafe-swiftshader','--use-angle=swiftshader']:process.platform === 'darwin' ? ['--use-angle=metal'] : [])] });
 try {
   const cdp = await browser.newBrowserCDPSession();
   const { userAgent } = await cdp.send('Browser.getVersion');
@@ -56,7 +63,6 @@ try {
   console.log('Game hooks ready. Waiting for textures/fonts/audio…');
   try { await page.waitForFunction(() => document.getElementById('preload')?.classList.contains('ready') && document.getElementById('preload')?.classList.contains('hidden')); } catch(e) { await page.screenshot({path:'.inspect/prepare-error.png'});console.log(await page.locator('#preload').evaluate(el=>({classes:el.className,text:el.innerText})));throw e; }
   console.log('Base assets loaded. Warming replay assets…');
-  const replay = JSON.parse(await readFile(process.argv[2] || 'd49cd02df245.ttrm', 'utf8'));
   replay.id = null;
   const raw = JSON.stringify(replay);
   await page.evaluate(raw => {

@@ -19,12 +19,12 @@ const [a,b]=await Promise.all([frames(reference),frames(candidate)]);
 if(!a.length||JSON.stringify(a)!==JSON.stringify(b))throw Error('Source folders must contain the same nonempty set of frame PNGs');
 const temp=await mkdtemp(path.join(os.tmpdir(),'replay-source-comparison-'));
 try{
-  for(const [dir,name]of [[reference,'a'],[candidate,'b']])await writeFile(path.join(temp,name+'.txt'),a.map(file=>`file '${path.join(dir,file).replace(/'/g,"'\\''")}'`).join('\n')+'\n');
-  const stats=path.join(temp,'stats.txt');
-  const child=spawn(ffmpeg,['-hide_banner','-loglevel','warning','-nostdin','-f','concat','-safe','0','-i',path.join(temp,'a.txt'),'-f','concat','-safe','0','-i',path.join(temp,'b.txt'),'-filter_complex',`[0:v]format=gbrp[a];[1:v]format=gbrp[b];[a][b]psnr=stats_file=${stats}:stats_version=2`,'-vsync','0','-f','null','-'],{stdio:['ignore','ignore','pipe']});
+  for(const [dir,name]of [[reference,'a'],[candidate,'b']])await writeFile(path.join(temp,name+'.txt'),a.map(file=>`file '${path.join(dir,file).replaceAll('\\','/').replace(/'/g,"'\\''")}'`).join('\n')+'\n');
+  const child=spawn(ffmpeg,['-hide_banner','-loglevel','warning','-nostdin','-f','concat','-safe','0','-i',path.join(temp,'a.txt'),'-f','concat','-safe','0','-i',path.join(temp,'b.txt'),'-filter_complex','[0:v]format=gbrp[a];[1:v]format=gbrp[b];[a][b]psnr=stats_file=-:stats_version=2','-vsync','0','-f','null','-'],{stdio:['ignore','pipe','pipe'],windowsHide:true});
+  let stats='';child.stdout.on('data',bytes=>{stats+=bytes});
   let errors='';child.stderr.on('data',bytes=>{errors=(errors+bytes).slice(-6000)});
   const [code]=await once(child,'exit');if(code!==0)throw Error('Source comparison failed: '+errors);
-  const lines=(await readFile(stats,'utf8')).split('\n').filter(line=>line.startsWith('n:'));
+  const lines=stats.split('\n').filter(line=>line.startsWith('n:'));
   if(lines.length!==a.length)throw Error(`Compared ${lines.length} samples, expected ${a.length}`);
   const samples=lines.map((line,i)=>{const values=Object.fromEntries(line.trim().split(/\s+/).map(item=>item.split(':')));const exact=values.psnr_avg==='inf',value=Number(values.psnr_avg);if(!exact&&!Number.isFinite(value))throw Error('Invalid PSNR result for '+a[i]);return{file:a[i],frame:Number(a[i].match(/\d+/)[0]),mse:Number(values.mse_avg),psnr:exact?null:value}});
   const finite=samples.filter(sample=>sample.psnr!==null),minimumPSNR=finite.length?Math.min(...finite.map(sample=>sample.psnr)):null;

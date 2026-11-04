@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {verifyWorkerPrefix,verifyWorkerTimeline} from '../src/offline/worker-integrity.mjs';
+const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const pcm=Buffer.from(Array.from({length:256},(_,i)=>(i*31+17)%256));
+const leader={count:8,fps:2,sampleRate:8,samples:32,finished:true,completedPrefix:false,selectedRounds:[1,2,3],audioPCMHash:hash(pcm),timelineRounds:[{round:1,startFrame:0,endFrame:2},{round:2,startFrame:2,endFrame:5},{round:3,startFrame:5,endFrame:8}]};
+const prefix={...leader,count:5,samples:20,finished:false,completedPrefix:true,selectedRounds:[2],audioPCMHash:hash(pcm.subarray(0,160)),timelineRounds:leader.timelineRounds.slice(0,2)};
+assert.equal(verifyWorkerPrefix(leader,leader,pcm).completeMatch,true);
+assert.equal(verifyWorkerTimeline({...prefix,audioPCMHash:null,videoOnlyWorker:true},leader).endFrame,5);
+assert.throws(()=>verifyWorkerPrefix({...prefix,audioPCMHash:null},leader,pcm),'Video-only metadata cannot pass a PCM verification');
+assert.deepEqual(verifyWorkerPrefix(prefix,leader,pcm),{startFrame:0,endFrame:5,samples:20,pcmSha256:prefix.audioPCMHash,verified:true,completeMatch:false});
+const bad=patch=>assert.throws(()=>verifyWorkerPrefix({...prefix,...patch},leader,pcm));
+bad({count:4,samples:16});bad({count:9,samples:36});bad({count:4.5});bad({samples:19});bad({fps:3});bad({sampleRate:16});bad({completedPrefix:false});bad({finished:true});bad({finished:undefined});bad({selectedRounds:[1,3]});bad({timelineRounds:prefix.timelineRounds.slice(1)});bad({timelineRounds:[...prefix.timelineRounds,{round:3,startFrame:5,endFrame:5}]});bad({audioPCMHash:'0'.repeat(64)});
+// Corruption before the selected round must fail too, not only its delivered range.
+const corrupt=Buffer.from(pcm.subarray(0,160));corrupt[0]^=1;bad({audioPCMHash:hash(corrupt)});
+assert.throws(()=>verifyWorkerPrefix(prefix,{...leader,finished:false},pcm));
+assert.throws(()=>verifyWorkerPrefix(prefix,{...leader,completedPrefix:true},pcm));
+assert.throws(()=>verifyWorkerPrefix(prefix,leader,pcm.subarray(8)));
+assert.throws(()=>verifyWorkerPrefix({...leader,completedPrefix:true},leader,pcm));
+console.log('PASS: complete/prefix worker PCM verification; corrupt unrendered gaps, invalid counts, incomplete rounds, false completion and incomplete leaders are rejected.');

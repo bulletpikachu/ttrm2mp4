@@ -13,14 +13,16 @@ if(!reportFile||!directory||!output)throw Error('Usage: node scripts/verify-inpu
 const report=JSON.parse(await readFile(reportFile,'utf8'));
 const minimumRequired=threshold===undefined?null:Number(threshold);
 if(minimumRequired!==null&&(!Number.isFinite(minimumRequired)||minimumRequired<0))throw Error('Invalid minimum PSNR');
-const files=(await readdir(directory)).filter(name=>/^frame-\d+\.nv12$/.test(name)).map(name=>({file:path.resolve(directory,name),frame:Number(name.match(/\d+/)[0])})).sort((a,b)=>a.frame-b.frame);
+const names=await readdir(directory),format=names.some(name=>/^frame-\d+\.nv12$/.test(name))?'nv12':'bgra';
+const files=names.filter(name=>new RegExp(`^frame-\\d+\\.${format}$`).test(name)).map(name=>({file:path.resolve(directory,name),frame:Number(name.match(/\d+/)[0])})).sort((a,b)=>a.frame-b.frame);
 if(!files.length||files.some(({frame},i)=>frame>=report.count||frame<0||i&&frame===files[i-1].frame))throw Error('Invalid or empty native input samples');
-const bytes=report.width*report.height*3/2;
+const bytes=report.width*report.height*(format==='nv12'?1.5:4);
 for(const {file}of files)if((await stat(file)).size!==bytes)throw Error('Native input has an unexpected size: '+file);
 const selection=files.map(({frame})=>`eq(n\\,${frame})`).join('+');
-const filter=`[0:v]select=${selection},setpts=N/(${report.fps}*TB),format=yuv420p[video];[1:v]format=yuv420p[reference];[video][reference]psnr=stats_file=-:shortest=1`;
+const conversion=format==='bgra'?'scale=out_color_matrix=bt601:out_range=tv,':'';
+const filter=`[0:v]select=${selection},setpts=N/(${report.fps}*TB),format=yuv420p[video];[1:v]${conversion}format=yuv420p[reference];[video][reference]psnr=stats_file=-:shortest=1`;
 const child=spawn(ffmpeg,['-hide_banner','-loglevel','warning','-nostdin','-i',report.output,
-  '-f','rawvideo','-pixel_format','nv12','-video_size',`${report.width}x${report.height}`,'-framerate',String(report.fps),'-i','pipe:0',
+  '-f','rawvideo','-pixel_format',format,'-video_size',`${report.width}x${report.height}`,'-framerate',String(report.fps),'-i','pipe:0',
   '-filter_complex',filter,'-an','-f','null','-'],{stdio:['pipe','pipe','pipe']});
 let logs='',errors='';child.stdout.on('data',chunk=>{logs+=chunk});child.stderr.on('data',chunk=>{errors=(errors+chunk).slice(-5000)});
 const completion=once(child,'exit');
@@ -33,8 +35,8 @@ if(values.length!==files.length)throw Error(`Compared ${values.length} frames; e
 const score=value=>value==='inf'?Infinity:Number(value);
 const minimumPSNR=Math.min(...values.map(value=>score(value.psnr_avg)));
 if(Number.isNaN(minimumPSNR))throw Error('Invalid PSNR result');
-const result={video:report.output,directory:path.resolve(directory),count:report.count,sampleCount:files.length,minimumPSNR:Number.isFinite(minimumPSNR)?minimumPSNR:'inf',minimumRequiredPSNR:minimumRequired,passed:minimumRequired===null||minimumPSNR>=minimumRequired,
+const result={video:report.output,directory:path.resolve(directory),referenceFormat:format,count:report.count,sampleCount:files.length,minimumPSNR:Number.isFinite(minimumPSNR)?minimumPSNR:'inf',minimumRequiredPSNR:minimumRequired,passed:minimumRequired===null||minimumPSNR>=minimumRequired,
   samples:values.map((value,i)=>({frame:files[i].frame,psnr:value.psnr_avg,lumaPSNR:value.psnr_y,chromaUPSNR:value.psnr_u,chromaVPSNR:value.psnr_v}))};
 await writeFile(output,JSON.stringify(result,null,2)+'\n');
-console.log(`${files.length} decoded frames compared to native NV12 inputs; minimum YUV PSNR ${result.minimumPSNR} dB.`);
+console.log(`${files.length} decoded frames compared to native ${format.toUpperCase()} inputs; minimum YUV PSNR ${result.minimumPSNR} dB.`);
 if(!result.passed)throw Error('Decoded input quality is below the requested threshold');

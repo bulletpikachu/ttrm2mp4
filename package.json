@@ -5,7 +5,10 @@
   "scripts": {
     "render": "node src/render.mjs",
     "render-fast": "node src/render-fast.mjs",
+    "render-windows-fast": "node src/render-windows-fast.mjs",
+    "prepare-windows-fast": "node scripts/prepare-windows-fast.mjs",
     "check": "node --check src/render.mjs",
+    "test:portable": "node scripts/check-video-encoder.mjs && node scripts/check-ffmpeg-video.mjs",
     "prepare-client": "node src/prepare.mjs",
     "prepare-native": "node scripts/prepare-native.mjs",
     "prepare-fast": "node scripts/prepare-fast.mjs",

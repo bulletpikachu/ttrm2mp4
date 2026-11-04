@@ -4,7 +4,33 @@ Convert a two-player `.ttrm` match into an MP4 using TETR.IO’s original game e
 
 ## Setup
 
-The fast exporter requires Apple Silicon macOS, Node.js 22+, and Xcode Command Line Tools. Install dependencies and prepare the client once while online:
+Windows: install Node.js 22+ and Google Chrome, then run the following in PowerShell. The portable renderer uses Chrome's original WebGL renderer and a bundled FFmpeg executable; it does not need native compilation or a separate FFmpeg installation.
+
+```powershell
+npm ci --omit=dev
+npm run prepare-client -- "C:\path\example.ttrm"
+npm run render -- "C:\path\example.ttrm" output/preview.mp4 --duration 10 --export-rounds --deterministic
+```
+
+The default is 1920×1080 at 60 fps with continuous stereo AAC audio. The browser encoder is tested before exporting: automatic selection tries H.264 hardware, software and alternative profiles, then falls back to CPU x264 through FFmpeg. `--encoder ffmpeg` forces the fallback; `--threads N` overrides its CPU-adaptive thread count. The fallback preserves the same simulation and audio timeline, but transfers raw pixels and is slower. `--encoder hardware` requires a working browser hardware configuration. JSON reports record the selected backend/configuration and failed probes. Automatic fallback handles unavailable encoders during startup; an encoder or GPU failure during export fails the command rather than restarting the match.
+
+For a smaller test add `--width 1280 --height 720`. `--software` selects software WebGL independently of the video encoder. If Chrome is installed elsewhere, pass `--chrome "C:\path\chrome.exe"` to both preparation and rendering.
+
+An experimental faster Windows x64 command uses Electron, direct media writes, a native exact audio mixer and continuous muxing. It requires the full dependencies and Visual Studio C++ Build Tools for one-time preparation:
+
+```powershell
+npm ci
+npm run prepare-windows-fast -- "C:\path\example.ttrm"
+npm run render-windows-fast -- "C:\path\example.ttrm" output/match.mp4
+```
+
+The current full nine-round Windows candidate exported 318.85 seconds in 98.01 seconds (3.25×), versus 205.22 seconds with the portable Chrome path. All frames, round PCM ranges and the canonical full audio hash passed. The 10× target has not been achieved on Windows. Game graphics and 1080p60 settings are retained. The Mac fast path remains separate. See the [Windows handoff](notes/windows-support.md#paused-handoff) for the current recommendation, reproduction command and remaining limitations.
+
+The separate experimental native D3D11/NVENC backend has since reached **44.42 seconds for the complete command (7.18×)** on the same match, improving the previous verified 49.39-second result. It uses three drawing workers, direct cached-file serving inside Electron, a lighter continuous audio-only simulation and Windows Media Foundation AAC. It requires additional native builds and the opt-in settings in the Windows notes. All 19,131 round/master frames, all 160 reference-image samples, complete audio timing and all nine decoded round-audio coverage/alignment checks pass. Original high graphics, 1080p60 and AA4 are retained; the different AAC encoder and its signed 16-bit input conversion are documented there. Windows 10× remains an open target.
+
+**Speed optimization is paused at the user's request (2026-11-04).** The last live-texture compute experiment took 52.24 seconds and is not recommended over the verified 44.42-second D3D11 result. Experimental compute modes remain opt-in; the public launchers and Mac defaults were not switched to them. The Windows notes record all final experiments and distinguish complete audits from preview-only checks. A standalone native installer and validation on other Windows machines remain unfinished.
+
+Apple Silicon macOS: the fast exporter additionally needs Xcode Command Line Tools and the native development dependencies. Its existing setup remains:
 
 ```sh
 npm install
@@ -19,6 +45,8 @@ Keep the project and cached files downloaded locally, and choose an output desti
 Git tracks the source, build scripts, dependency lockfile, and documentation. Downloaded game files, installers, local replay inputs, dependencies, compiled native modules, and generated export artifacts are excluded. A fresh checkout needs its own replay file and the setup steps above; it does not include the local `client/` cache.
 
 ## Export
+
+On Windows use `npm run render -- example.ttrm output.mp4 --export-rounds --deterministic`. The commands in this section using `render-fast` apply to Apple Silicon macOS only.
 
 ```sh
 npm run render-fast -- example.ttrm output.mp4
@@ -57,10 +85,20 @@ node scripts/verify-rounds.mjs output.json
 
 Visual verification also compares sampled decoded frames with the previous native renderer inputs, including countdowns and transitions. This preserves the previous quality settings and checks for frame shifts; it does not claim pixel-identical output between Chromium and native ANGLE. The native background can vary during initialization, so an additional same-run native-canvas check verifies the opening frame’s fidelity.
 
+For portable exports, decode the finished MP4 to check frame count, audio/video timestamp alignment and continuous audio coverage:
+
+```sh
+node scripts/verify-av.mjs output.json
+node scripts/verify-rounds.mjs output.json
+npm run test:portable
+```
+
+The timestamp check allows only final AAC packet padding; round PCM is independently compared with the continuous master during export. These checks establish file/timeline integrity, and do not replace listening to the output. See [Windows progress and limitations](notes/windows-support.md) for the tested machine, commands and packaging status.
+
 `REPLAY_X264_THREADS=N` can override the encoding thread count. Extra threads are not a linear speed multiplier because rendering and encoding share the same CPU and GPU.
 
 ## Other backends
 
-The original Chrome exporter remains available with `npm run render -- example.ttrm output.mp4 --export-rounds`; it requires Google Chrome and is slower. Older parallel and diagnostic backends remain experimental. Their measurements and limitations are documented in [the performance notes](notes/native-performance.md).
+The portable Chrome exporter is available with `npm run render -- example.ttrm output.mp4 --export-rounds`; it requires Google Chrome and is slower than the native Mac path. Older parallel and diagnostic backends remain experimental. Their measurements and limitations are documented in [the performance notes](notes/native-performance.md).
 
 TETR.IO and its assets remain the property of their respective owners. Client patches target the pinned build and fail if expected source code changes.

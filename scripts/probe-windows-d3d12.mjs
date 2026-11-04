@@ -1,0 +1,22 @@
+import {createRequire} from 'node:module';
+import {writeFile} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import ffmpeg from 'ffmpeg-static';
+import {createCanvas} from '../.native-deps/node-webgl-windows/dist/index.js';
+const require=createRequire(import.meta.url),probe=require('../.native-deps/windows-gpu/windows-d3d12-probe.node');
+const canvas=createCanvas(256,256),gl=canvas.getContext('webgl2');assert(gl);
+gl.clearColor(1,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.finish();
+const results=probe.probe(gl._n._replayEGL()).map(({h264,...result})=>{
+  if(!h264)return result;
+  const nv12=result.format==='NV12',decoded=spawnSync(ffmpeg,['-hide_banner','-loglevel','error','-f','h264','-i','pipe:0','-frames:v','1','-pix_fmt',nv12?'yuv420p':'rgb24','-f','rawvideo','pipe:1'],{input:h264,windowsHide:true});
+  assert.equal(decoded.status,0,decoded.stderr.toString());assert.equal(decoded.stdout.length,256*256*(nv12?1.5:3));
+  const actual=nv12?[decoded.stdout[0],decoded.stdout[256*256],decoded.stdout[256*256*5/4]]:[...decoded.stdout.subarray(0,3)],expected=[64,127,191];
+  for(let i=0;i<3;i++)assert(Math.abs(actual[i]-expected[i])<=(nv12?3:8),'D3D12 NVENC known-color decoded samples');
+  return{...result,nativeH264Bytes:h264.length,decodedSamples:actual,decodedFormat:nv12?'Y/U/V':'RGB'};
+});
+gl.clearColor(0,1,0,1);gl.clear(gl.COLOR_BUFFER_BIT);const pixel=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);assert.deepEqual([...pixel],[0,255,0,255]);
+const report={results,originalContextUsable:true,noGLFinishBeforeD3D12Copy:true,note:'Single-frame interop/NVENC capability probe only; no replay-export speed claim.'};
+if(process.argv[2])await writeFile(process.argv[2],JSON.stringify(report,null,2)+'\n');
+console.log(JSON.stringify(report,null,2));
+assert(results.every(result=>result.passed),'D3D12 interop or NVENC probe failed; inspect the capability report');

@@ -5,6 +5,7 @@
   const commands=window.__glCommandSchema;
   const bridge=require(window.__glBatchModule);
   const asynchronous=process.env.REPLAY_GL_ASYNC==='1';let started=false;
+  const shadow=asynchronous||process.env.REPLAY_GL_SHADOW==='1';
   const deduplicate=process.env.REPLAY_GL_DEDUPE==='1';
   const specialize=process.env.REPLAY_GL_SPECIALIZE==='1';
   if(specialize&&deduplicate)throw Error('GL specialization and deduplication cannot be combined');
@@ -19,7 +20,7 @@
   window.__nativeGLStart=()=>{if(asynchronous&&!started){flush();bridge.startThread();started=true;metrics.asynchronous=true;}};
   window.__nativeGLThreadStats=()=>bridge.threadStats();
   window.__installGLBatch=gl=>{
-    if(!loaded){bridge.load(window.__glBatchAngle);loaded=true;}
+    if(!loaded){bridge.load(window.__windowsNativeGLBatch?gl._n._replayEGL():window.__glBatchAngle);loaded=true;}
     const original=gl._n,proxy=Object.create(original);
     const define=(name,value)=>Object.defineProperty(proxy,name,{value,configurable:true,writable:true});
     // NAPI exports are non-writable. Define own properties explicitly, including
@@ -31,7 +32,7 @@
       return result;};
     for(let owner=original;owner&&owner!==Object.prototype;owner=Object.getPrototypeOf(owner))for(const name of Object.getOwnPropertyNames(owner))if(typeof original[name]==='function'&&!Object.hasOwn(proxy,name))define(name,(...args)=>fallback(name,args));
     let state,textures,enabled;
-    if(asynchronous){
+    if(shadow){
       const query=(method,key,out,expected)=>{
         if(verifyShadow){const actual=new out.constructor(expected.length);fallback(method,[key,actual]);for(let i=0;i<expected.length;i++)if(actual[i]!==expected[i])throw Error(`GL state cache mismatch ${key}: ${Array.from(actual)} vs ${expected}`);metrics.shadowChecks=(metrics.shadowChecks||0)+1;}
         out.set(expected);
@@ -85,7 +86,7 @@
         if(payload)bytes.set(payload,offset+header);offset=end;metrics.calls++;
       });
     }
-    if(asynchronous&&process.env.REPLAY_GL_POOL==='1')for(const name of ['genBuffers','genVertexArrays'])if(typeof original[name]==='function'){
+    if(shadow&&process.env.REPLAY_GL_POOL==='1')for(const name of ['genBuffers','genVertexArrays'])if(typeof original[name]==='function'){
       let pool=new Uint32Array(0),cursor=0;
       const pools=metrics.resourcePools??={};
       const stats=pools[name]??={allocations:0,names:0,hits:0};

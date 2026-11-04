@@ -1,0 +1,24 @@
+#include <nvEncodeAPI.h>
+#include <vector>
+static void NVCheck(NVENCSTATUS status,const char*operation){if(status!=NV_ENC_SUCCESS)throw std::runtime_error(std::string(operation)+": NVENC status "+std::to_string((int)status));}
+static std::vector<uint8_t> EncodeProbeTexture(ID3D11Device*device,ID3D11Texture2D*texture){
+  struct State{
+    HMODULE library=nullptr;NV_ENCODE_API_FUNCTION_LIST api{};void*encoder=nullptr;NV_ENC_REGISTERED_PTR registered=nullptr;NV_ENC_INPUT_PTR input=nullptr;NV_ENC_OUTPUT_PTR output=nullptr;bool locked=false;
+    ~State(){if(encoder){if(locked)api.nvEncUnlockBitstream(encoder,output);if(input)api.nvEncUnmapInputResource(encoder,input);if(output)api.nvEncDestroyBitstreamBuffer(encoder,output);if(registered)api.nvEncUnregisterResource(encoder,registered);api.nvEncDestroyEncoder(encoder);}if(library)FreeLibrary(library);}
+  }s;
+  s.library=LoadLibraryExW(L"nvEncodeAPI64.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);Check(s.library,"Cannot load the installed NVIDIA encoder driver");
+  auto create=(decltype(&NvEncodeAPICreateInstance))GetProcAddress(s.library,"NvEncodeAPICreateInstance");Check(create,"Driver has no NVENC interface");s.api.version=NV_ENCODE_API_FUNCTION_LIST_VER;NVCheck(create(&s.api),"Create NVENC interface");
+  NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS open{};open.version=NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;open.device=device;open.deviceType=NV_ENC_DEVICE_TYPE_DIRECTX;open.apiVersion=NVENCAPI_VERSION;NVCheck(s.api.nvEncOpenEncodeSessionEx(&open,&s.encoder),"Open D3D11 NVENC session");
+  NV_ENC_PRESET_CONFIG preset{};preset.version=NV_ENC_PRESET_CONFIG_VER;preset.presetCfg.version=NV_ENC_CONFIG_VER;
+  NVCheck(s.api.nvEncGetEncodePresetConfigEx(s.encoder,NV_ENC_CODEC_H264_GUID,NV_ENC_PRESET_P1_GUID,NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY,&preset),"Get hardware preset");
+  NV_ENC_CONFIG config=preset.presetCfg;config.profileGUID=NV_ENC_H264_PROFILE_HIGH_GUID;config.gopLength=60;config.frameIntervalP=1;config.rcParams.rateControlMode=NV_ENC_PARAMS_RC_CONSTQP;config.rcParams.constQP={18,18,18};
+  auto&vui=config.encodeCodecConfig.h264Config.h264VUIParameters;vui.videoSignalTypePresentFlag=1;vui.videoFormat=NV_ENC_VUI_VIDEO_FORMAT_UNSPECIFIED;vui.colourDescriptionPresentFlag=1;vui.colourPrimaries=NV_ENC_VUI_COLOR_PRIMARIES_BT709;vui.transferCharacteristics=NV_ENC_VUI_TRANSFER_CHARACTERISTIC_SRGB;vui.colourMatrix=NV_ENC_VUI_MATRIX_COEFFS_SMPTE170M;
+  NV_ENC_INITIALIZE_PARAMS init{};init.version=NV_ENC_INITIALIZE_PARAMS_VER;init.encodeGUID=NV_ENC_CODEC_H264_GUID;init.presetGUID=NV_ENC_PRESET_P1_GUID;init.tuningInfo=NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;init.encodeWidth=init.encodeHeight=init.darWidth=init.darHeight=init.maxEncodeWidth=init.maxEncodeHeight=256;init.frameRateNum=60;init.frameRateDen=1;init.enablePTD=1;init.encodeConfig=&config;NVCheck(s.api.nvEncInitializeEncoder(s.encoder,&init),"Initialize H264 encoder");
+  NV_ENC_CREATE_BITSTREAM_BUFFER output{};output.version=NV_ENC_CREATE_BITSTREAM_BUFFER_VER;NVCheck(s.api.nvEncCreateBitstreamBuffer(s.encoder,&output),"Create H264 buffer");s.output=output.bitstreamBuffer;
+  NV_ENC_REGISTER_RESOURCE registration{};registration.version=NV_ENC_REGISTER_RESOURCE_VER;registration.resourceType=NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;registration.width=registration.height=256;registration.resourceToRegister=texture;registration.bufferFormat=NV_ENC_BUFFER_FORMAT_ARGB;registration.bufferUsage=NV_ENC_INPUT_IMAGE;NVCheck(s.api.nvEncRegisterResource(s.encoder,&registration),"Register shared ANGLE D3D11 texture");s.registered=registration.registeredResource;
+  NV_ENC_MAP_INPUT_RESOURCE input{};input.version=NV_ENC_MAP_INPUT_RESOURCE_VER;input.registeredResource=s.registered;NVCheck(s.api.nvEncMapInputResource(s.encoder,&input),"Map shared texture for NVENC");s.input=input.mappedResource;
+  NV_ENC_PIC_PARAMS picture{};picture.version=NV_ENC_PIC_PARAMS_VER;picture.inputBuffer=s.input;picture.bufferFmt=input.mappedBufferFmt;picture.inputWidth=picture.inputHeight=256;picture.outputBitstream=s.output;picture.pictureStruct=NV_ENC_PIC_STRUCT_FRAME;picture.encodePicFlags=NV_ENC_PIC_FLAG_FORCEIDR|NV_ENC_PIC_FLAG_OUTPUT_SPSPPS;picture.inputDuration=1;NVCheck(s.api.nvEncEncodePicture(s.encoder,&picture),"Encode shared texture");
+  NV_ENC_PIC_PARAMS eos{};eos.version=NV_ENC_PIC_PARAMS_VER;eos.encodePicFlags=NV_ENC_PIC_FLAG_EOS;NVCheck(s.api.nvEncEncodePicture(s.encoder,&eos),"Flush shared texture encoder");
+  NV_ENC_LOCK_BITSTREAM lock{};lock.version=NV_ENC_LOCK_BITSTREAM_VER;lock.outputBitstream=s.output;NVCheck(s.api.nvEncLockBitstream(s.encoder,&lock),"Read hardware H264 bitstream");s.locked=true;Check(lock.bitstreamSizeInBytes>0,"Native encoder produced no bytes");
+  auto data=static_cast<const uint8_t*>(lock.bitstreamBufferPtr);return std::vector<uint8_t>(data,data+lock.bitstreamSizeInBytes);
+}

@@ -13,7 +13,8 @@ for(const [opcode,command]of commands.entries()){
   for(const [i,type]of [...command.types].entries())if(type!=='f'){
     const max=type==='u'?4294967295:type==='i'?2147483647:type==='b'?1:9007199254740991;
     const min=type==='i'?-2147483648:0;
-    lines.push(`if(!std::isfinite(v[${i}])||v[${i}]<${min}||v[${i}]>${max})return false;`);
+    // Explicit doubles avoid MSVC treating -2147483648 as unsigned unary minus.
+    lines.push(`if(!std::isfinite(v[${i}])||v[${i}]<${min}.0||v[${i}]>${max}.0)return false;`);
   }
   const pointer=command.types.indexOf('d');
   if(pointer>=0)lines.push(`const double amount=${command.bytes};if(!std::isfinite(amount)||amount<0||amount>67108864)return false;const size_t offset=(size_t)v[${pointer}];if(v[${pointer}]!=offset||offset%8)return false;if(offset&&(offset<header||offset>end||(size_t)amount>end-offset))return false;${command.nullable?'':'if(!offset&&amount)return false;'}const void*ptr=offset?data+offset:nullptr;`);

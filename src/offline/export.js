@@ -1,4 +1,4 @@
-window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSeconds, roundCount, queue = 8, encoderMode = "hardware", latencyMode = "quality", encoderRate = null, selectedRounds = null, deterministic = false,qualityInterval=2,roundFrameLimits=[] }) {
+window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSeconds, roundCount, queue = 8, encoderMode = "hardware", latencyMode = "quality", encoderRate = null, selectedRounds = null, deterministic = false,qualityInterval=2,roundFrameLimits=[],stopAfterSelected=false,videoOnlyWorker=false,frameWindow=null }) {
   const native = window.__native;
   const microtaskQueue=typeof process!=='undefined'&&process.env.REPLAY_MICROTASK_QUEUE==='1';
   // Fifteen queued jobs plus the awaiting continuation preserve the same
@@ -12,6 +12,7 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
   const font = getComputedStyle(document.getElementById('data_replay')).fontFamily;
   let pending = Promise.resolve(), failure, count = 0, encodedCount = 0;
   const selection=selectedRounds===null?null:new Set(selectedRounds);
+  const lastSelected=!frameWindow&&stopAfterSelected&&selection?.size?Math.max(...selection):null;
   const timelineRounds=[],warmingRounds=new Set(),warmups=new Map();let timelineRound=null,timelineStart=0;
   const base64 = bytes => {
     let s = '';
@@ -61,17 +62,20 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
   }
   const config = { latencyMode, codec: encoderRate > 120 ? 'avc1.640034' : 'avc1.640033', width, height, bitrate: Math.round(12000000*(encoderRate||fps)/fps), framerate: encoderRate||fps, hardwareAcceleration: encoderMode === 'software' ? 'prefer-software' : 'prefer-hardware', avc: { format: 'annexb' } };
   const audioOnly=selection?.size===0&&!!window.__installNativeAudio;
+  if(audioOnly&&window.__installAudioOnlyParticles)window.__installAudioOnlyParticles();
   let rawEncoder;
   if(audioOnly){window.__installNativeAudio(window.__nativeEncoderOptions);rawEncoder={finish:async()=>window.__nativeGLFlush?.()};}
   else rawEncoder=window.__createRawEncoder?.({width,height,fps});
+  const videoEncoding = rawEncoder ? null : await window.__selectVideoEncoder(config, encoderMode);
+  if(videoEncoding?.backend==='ffmpeg')rawEncoder=window.__createFFmpegEncoder({width,height,fps});
   if(rawEncoder?.ready)await rawEncoder.ready;
-  if (!rawEncoder && !(await VideoEncoder.isConfigSupported(config)).supported) throw Error('This Chrome cannot encode H.264 with WebCodecs.');
   let packets = [], packetBytes = 0;
   function flushPackets() {
     if(!packetBytes) return;
     const bytes = new Uint8Array(packetBytes);let offset=0;
     for(const packet of packets){bytes.set(packet,offset);offset+=packet.length}
     packets=[];packetBytes=0;
+    if(window.__writeEncodedVideo){try{window.__writeEncodedVideo(bytes)}catch(error){failure=error}return;}
     const encoded=base64(bytes);
     pending=pending.then(()=>window.__writeVideo(encoded)).catch(e=>{failure=e});
   }
@@ -83,20 +87,26 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     },
     error(error) { failure = error; },
   });
-  encoder?.configure(config);
-  const timings = { simulation:0, draw:0, warmDraw:0, encode:0, queueWait:0, roundPublish:0,roundEncoderFlush:0,roundMusic:0,roundMixWrite:0,roundHostCommit:0 };
+  encoder?.configure(videoEncoding.config);
+  const phaseTimings=typeof process!=='undefined'&&process.env.REPLAY_PHASE_TIMINGS==='1';
+  const timings = { simulation:0, draw:0, warmDraw:0, encode:0, queueWait:0, roundPublish:0,roundEncoderFlush:0,roundMusic:0,roundMixWrite:0,roundHostCommit:0,...(phaseTimings?{endCheckpoint:0,skippedDraw:0,progress:0,yield:0}:{}) };
   const wallNow = window.__timeline.wallNow;
-  let activeRound=null,roundStart=0,completedMasterAudio=null;
+  let activeRound=null,roundStart=0,completedMasterAudio=null,completedPrefix=false,completedFrameWindow=false;
   const finalAudioReuse=typeof process!=='undefined'&&process.env.REPLAY_FINAL_AUDIO_REUSE==='1';
   const roundAudioOverlap=typeof process!=='undefined'&&process.env.REPLAY_OVERLAP_ROUND_AUDIO==='1';
   async function finishRound(partial=false,final=false,finalMusic=null){
     if(!window.__finishRound || activeRound===null)return;
-    const renderMusic=()=>final&&finalAudioReuse?(finalMusic||native.audio._context.startRendering()):native.audio._context.__renderPrefix(count/fps);
-    const musicPending=roundAudioOverlap?renderMusic():null;musicPending?.catch(()=>{});
+    const renderMusic=()=>final&&finalAudioReuse?(finalMusic||(completedPrefix?native.audio._context.__renderPrefix(count/fps):native.audio._context.startRendering())):native.audio._context.__renderPrefix(count/fps);
+    const musicPending=!videoOnlyWorker&&roundAudioOverlap?renderMusic():null;musicPending?.catch(()=>{});
     let phase=wallNow();
     if(rawEncoder?.flushRound)await rawEncoder.flushRound();
     else {await encoder.flush();flushPackets();await pending;}
     timings.roundEncoderFlush+=wallNow()-phase;phase=wallNow();
+    if(videoOnlyWorker){
+      window.__endDirectRound?.();
+      await window.__finishRound({round:activeRound,startFrame:roundStart,endFrame:count,fps,sampleRate:native.audio._context.sampleRate,partial,audioFromLeader:true,...(frameWindow?{fragment:true}:{})});
+      timings.roundHostCommit+=wallNow()-phase;return;
+    }
     // Once simulation ends the original graph is complete. Render it once,
     // then use its exact sample range for the final round and the master.
     const music=await (musicPending||renderMusic());
@@ -106,12 +116,16 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     if(final&&finalAudioReuse)completedMasterAudio=music;
     await writeAudio(music,first,last,window.__writeRoundAudio);
     timings.roundMixWrite+=wallNow()-phase;phase=wallNow();
+    window.__endDirectRound?.();
     await window.__finishRound({round:activeRound,startFrame:roundStart,endFrame:count,fps,sampleRate:music.sampleRate,partial});
     timings.roundHostCommit+=wallNow()-phase;
   }
   const maxFrames = Math.ceil((limitSeconds || maxSeconds) * fps);
   let started = false, finished = false, simulationSteps = 0;
   for (let i = 0; i < maxFrames; i++) {
+    if(frameWindow&&frameWindow.endFrame!==null&&count>=frameWindow.endFrame){
+      completedFrameWindow=true;await finishRound(true,true);activeRound=null;break;
+    }
     // Simulate at the game's fixed 60 Hz even when exporting a lower frame rate.
     let measuredAt = wallNow();
     const targetStep = Math.round((i + 1) * 60 / fps);
@@ -124,18 +138,24 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     if(deterministic){if(microtaskQueue)await microtaskCheckpoint();else for(let settle=0;settle<16;settle++)await Promise.resolve();}
     timings.simulation += wallNow()-measuredAt;measuredAt=wallNow();
     const spans = [...document.getElementById('data_replay').querySelectorAll(':scope > span')].map(el => el.textContent);
-    const id=Number(spans[2]||1),shouldRender=!selection||selection.has(id);
-    if(selection?.has(id+1)&&Math.max(0,...native.games.map(game=>game.getFrame()))>=roundFrameLimits[id-1]-120)warmingRounds.add(id);
-    const warmPrevious=warmingRounds.has(id);
+    const id=Number(spans[2]||1),shouldRender=frameWindow?count>=frameWindow.startFrame:!selection||selection.has(id);
+    if(!frameWindow&&selection?.has(id+1)&&Math.max(0,...native.games.map(game=>game.getFrame()))>=roundFrameLimits[id-1]-120)warmingRounds.add(id);
+    const warmPrevious=frameWindow?count>=Math.max(0,frameWindow.startFrame-frameWindow.warmupFrames)&&count<frameWindow.startFrame:warmingRounds.has(id);
     if(id!==timelineRound){
       if(timelineRound!==null)timelineRounds.push({round:timelineRound,startFrame:timelineStart,endFrame:count});
+      if(lastSelected!==null&&id>lastSelected){
+        completedPrefix=true;await finishRound(false,true);activeRound=null;timelineRound=null;break;
+      }
       timelineRound=id;timelineStart=count;
       if(window.__beginRound){
         const publishStarted=wallNow();
         await finishRound();activeRound=null;
-        if(shouldRender){activeRound=id;roundStart=count;await window.__beginRound({round:id,startFrame:count});rawEncoder?.beginRound?.();}
+        if(shouldRender){activeRound=id;roundStart=count;await window.__beginRound({round:id,startFrame:count});window.__beginDirectRound?.();const begin=rawEncoder?.beginRound?.();if(begin?.then)await begin;}
         const publishMs=wallNow()-publishStarted;timings.roundPublish+=publishMs;measuredAt+=publishMs;
       }
+    }
+    if(frameWindow&&shouldRender&&activeRound===null){
+      activeRound=id;roundStart=count;await window.__beginRound({round:id,startFrame:count});window.__beginDirectRound?.();const begin=rawEncoder?.beginRound?.();if(begin?.then)await begin;
     }
     if(shouldRender||warmPrevious){
     if(shouldRender&&rawEncoder?.beforeFrame)await rawEncoder.beforeFrame();
@@ -177,32 +197,41 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     }
     // Awaiting the encoder normally lets native replay promises settle each
     // frame. Skipped rounds need the same microtask boundary.
-    else await Promise.resolve();
+    else {if(phaseTimings)timings.skippedDraw+=wallNow()-measuredAt;await Promise.resolve();}
+    if(phaseTimings)measuredAt=wallNow();
     if(deterministic){if(microtaskQueue)await microtaskCheckpoint();else for(let settle=0;settle<16;settle++)await Promise.resolve();}
+    if(phaseTimings)timings.endCheckpoint+=wallNow()-measuredAt;
     count++;
     if (failure) throw failure;
     if (i % ((selection||__timeline.fastYield&&rawEncoder)?fps*10:fps) === 0) {
+      if(phaseTimings)measuredAt=wallNow();
       await pending;
       await window.__renderProgress({ seconds: count / fps, round: spans[2], frames: native.games.map(g => g.getFrame()) });
+      if(phaseTimings){timings.progress+=wallNow()-measuredAt;measuredAt=wallNow();}
       await window.__timeline.yield();
+      if(phaseTimings)timings.yield+=wallNow()-measuredAt;
     }
   }
   if(timelineRound!==null)timelineRounds.push({round:timelineRound,startFrame:timelineStart,endFrame:count});
-  const finalMusic=roundAudioOverlap&&finalAudioReuse&&activeRound!==null?native.audio._context.startRendering():null;finalMusic?.catch(()=>{});
+  const finalMusic=!videoOnlyWorker&&roundAudioOverlap&&finalAudioReuse&&activeRound!==null?native.audio._context.startRendering():null;finalMusic?.catch(()=>{});
   if(rawEncoder) await rawEncoder.finish();
   else { await encoder.flush();flushPackets();await pending; }
   await finishRound(!finished,true,finalMusic);
   encoder?.close();
   await window.__renderProgress({stage:'video complete'});
   if (failure) throw failure;
-  if (!finished && !limitSeconds) throw Error('Native replay did not finish within the export frame limit.');
-  await window.__renderProgress({stage:'audio rendering started'});
-  const audio = completedMasterAudio||await native.audio._context.startRendering();
-  await window.__renderProgress({stage:'audio rendering complete'});
-  const samples = Math.round(count / fps * audio.sampleRate);
-  if (samples > audio.length) throw Error('Offline audio buffer was too short.');
-  if(!completedMasterAudio)mixEffects(audio, 0, samples);
-  await writeAudio(audio,0,samples,window.__writeAudio);
-  await window.__renderProgress({stage:'audio transfer complete'});
-  return { rawEncoder:!!rawEncoder,audioOnly,finalAudioReuse:!!completedMasterAudio,roundAudioOverlap, timings, encoderRate, latencyMode, encoderMode, queue, count, encodedCount, timelineRounds, selectedRounds, warmups:[...warmups.values()], deterministic,simulationMicrotaskCheckpoint:deterministic?16:0,microtaskQueue,fastYield:window.__timeline.fastYield, audioPCMHash:window.__nativePCMHash?.(), audioGraph:window.__traceAudioGraph?native.audio._context.__describeGraph():undefined, duration: count / fps, sampleRate: audio.sampleRate, samples, finished };
+  if (!finished && !completedPrefix && !completedFrameWindow && !limitSeconds) throw Error('Native replay did not finish within the export frame limit.');
+  let sampleRate,samples,audioPCMHash=null;
+  if(videoOnlyWorker){sampleRate=native.audio._context.sampleRate;samples=Math.round(count/fps*sampleRate);}
+  else{
+    await window.__renderProgress({stage:'audio rendering started'});
+    const audio = completedMasterAudio||await (completedPrefix?native.audio._context.__renderPrefix(count/fps):native.audio._context.startRendering());
+    await window.__renderProgress({stage:'audio rendering complete'});
+    sampleRate=audio.sampleRate;samples=Math.round(count/fps*sampleRate);
+    if (samples > audio.length) throw Error('Offline audio buffer was too short.');
+    if(!completedMasterAudio)mixEffects(audio, 0, samples);
+    await writeAudio(audio,0,samples,window.__writeAudio);
+    await window.__renderProgress({stage:'audio transfer complete'});audioPCMHash=window.__nativePCMHash?.();
+  }
+  return { rawEncoder:!!rawEncoder,videoEncoding,audioOnly,audioOnlyParticleUpdates:window.__audioOnlyParticleStats,finalAudioReuse:!!completedMasterAudio,roundAudioOverlap, timings, encoderRate, latencyMode, encoderMode, queue, count, encodedCount, timelineRounds, selectedRounds, completedPrefix, completedFrameWindow, frameWindow, warmups:[...warmups.values()], deterministic,simulationMicrotaskCheckpoint:deterministic?16:0,microtaskQueue,fastYield:window.__timeline.fastYield, audioPCMHash, videoOnlyWorker, audioGraph:window.__traceAudioGraph?native.audio._context.__describeGraph():undefined, duration: count / fps, sampleRate, samples, finished };
 };

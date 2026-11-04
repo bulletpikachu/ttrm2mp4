@@ -1,0 +1,12 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+const directory = new URL('../.native-deps/windows-gpu/', import.meta.url);
+await mkdir(directory, { recursive: true });
+const url = 'https://raw.githubusercontent.com/FFmpeg/nv-codec-headers/n12.1.14.0/include/ffnvcodec/nvEncodeAPI.h';
+const response = await fetch(url); if (!response.ok) throw Error(`NVENC header: ${response.status}`);
+const bytes = Buffer.from(await response.arrayBuffer()), sha256 = createHash('sha256').update(bytes).digest('hex');
+if(sha256!=='dbdaa8bcbc2b9325bd24bc68b36170a8432411518040e8d4c8421608cf217425')throw Error('Pinned NVENC header checksum changed');
+await writeFile(new URL('nvEncodeAPI.h', directory), bytes);
+await writeFile(new URL('header-source.json', directory), JSON.stringify({ url, sha256 }, null, 2));
+console.log(`Saved NVENC 12.1 header to ${fileURLToPath(directory)}; SHA-256 ${sha256}`);
