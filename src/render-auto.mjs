@@ -82,16 +82,18 @@ Use npm run render-portable -- --help for all portable renderer options.`);
       const preview=[path.resolve(positionals[0]),path.join(temporary,'check.mp4'),...dimensions,...(appearance?['--appearance',appearance]:[]),'--duration','0.1'];
       if(backend==='mac')await run('src/render-fast.mjs',[...preview,'--threads',String(nativeThreads)],{probe:true});
       else{
+        const env={...windowsFastEnvironment(),REPLAY_GL_BATCH:'1',REPLAY_GL_ASYNC:'1',REPLAY_WINDOWS_ASYNC:'1',REPLAY_WINDOWS_FENCE:'1',REPLAY_WINDOWS_NV12:'1'};
+        // Verify that a single renderer works before testing concurrent sessions.
+        await run('src/render.mjs',[...preview,'--engine','electron','--native-webgl','--windows-encoder','--export-rounds','--deterministic'],
+          {probe:true,env});
         // Check simultaneous NVENC sessions at the proposed concurrency. Older
         // drivers or other running encoders may leave fewer sessions available.
         jobs=await probeWorkerCount({jobs,explicit:values.jobs!==undefined,
           onRetry:count=>console.log(`Retrying native startup with ${count} drawing worker(s)…`),
           probeGroup:count=>run('scripts/probe-render-windows.mjs',
             ['--group',String(count),String(width),String(height),optionValue(args,'fps','60'),temporary],
-            {probe:true,env:{...windowsFastEnvironment(),REPLAY_WINDOWS_ASYNC:'1',REPLAY_WINDOWS_FENCE:'1',REPLAY_WINDOWS_NV12:'1'}}),
+            {probe:true,env}),
         });
-        await run('src/render.mjs',[...preview,'--engine','electron','--native-webgl','--windows-encoder','--export-rounds','--deterministic'],
-          {probe:true,env:{...windowsFastEnvironment(),REPLAY_GL_BATCH:'1',REPLAY_GL_ASYNC:'1',REPLAY_WINDOWS_ASYNC:'1',REPLAY_WINDOWS_FENCE:'1',REPLAY_WINDOWS_NV12:'1'}});
         // The fast Windows pipeline also requires Media Foundation AAC.
         const {default:ffmpeg}=await import('ffmpeg-static');
         await run(null,['-hide_banner','-loglevel','error','-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t','0.1','-af','apad=pad_len=2048,asetnsamples=n=2048:p=1','-c:a','aac_mf','-threads','1','-b:a','192k',path.join(temporary,'check.m4a')],{probe:true,executable:ffmpeg});

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {resourceDefaults,extractOptions,positiveInteger,selectBackend,probeWorkerCount,windowsFastEnvironment} from '../src/offline/render-policy.mjs';
-const env=windowsFastEnvironment({REPLAY_WINDOWS_COMPUTE:'1',REPLAY_WINDOWS_GPU_BATCH:'16',Path:'test-path'});
+const env=windowsFastEnvironment({REPLAY_WINDOWS_COMPUTE:'1',REPLAY_WINDOWS_GPU_BATCH:'16',NODE_WEBGL_BACKEND:'vulkan',REPLAY_WINDOWS_NVIDIA_ADAPTER:'0',Path:'test-path'});
 assert.equal(env.REPLAY_WINDOWS_COMPUTE,'0');assert.equal(env.REPLAY_WINDOWS_GPU_BATCH,'4');assert.equal(env.Path,'test-path');
+assert.equal(env.NODE_WEBGL_BACKEND,'d3d11');assert.equal(env.REPLAY_WINDOWS_NVIDIA_ADAPTER,'1');
 const gib=1024**3;
 assert.deepEqual(resourceDefaults({cores:1,memoryBytes:2*gib}),{jobs:1,nativeThreads:1,portableThreads:1});
 assert.equal(resourceDefaults({cores:6,memoryBytes:16*gib}).jobs,3);

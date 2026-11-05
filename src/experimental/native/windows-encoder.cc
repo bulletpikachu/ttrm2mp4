@@ -35,7 +35,10 @@ static PFNEGLGETPROCADDRESSPROC proc;
 template<class T>static T P(const char*name){auto f=reinterpret_cast<T>(proc(name));if(!f)throw std::runtime_error(std::string("Missing GL function: ")+name);return f;}
 static void Check(bool condition,const char*message){if(!condition)throw std::runtime_error(message);}
 static bool Enabled(const char*name){const char*value=getenv(name);return value&&value[0]=='1'&&value[1]=='\0';}
-static void NVCheck(NVENCSTATUS result,const char*message){if(result!=NV_ENC_SUCCESS)throw std::runtime_error(std::string(message)+": NVENC "+std::to_string((int)result));}
+static void NVCheck(NVENCSTATUS result,const char*message){
+  if(result==NV_ENC_ERR_NO_ENCODE_DEVICE)throw std::runtime_error(std::string(message)+": NVENC found no encoding device (NV_ENC_ERR_NO_ENCODE_DEVICE)");
+  if(result!=NV_ENC_SUCCESS)throw std::runtime_error(std::string(message)+": NVENC "+std::to_string((int)result));
+}
 static double Ms(Clock::time_point start){return std::chrono::duration<double,std::milli>(Clock::now()-start).count();}
 template<class T>static T Proc(const char*name){return P<T>(name);}
 struct BufferStorage{GLsizeiptr size;GLenum usage;std::vector<uint8_t>shadow;};

@@ -86,6 +86,8 @@ npm run render-windows-fast -- "C:\path\example.ttrm" output/match.mp4
 
 `prepare-windows-fast` builds the native audio mixer, ANGLE binding and NVENC encoder, then warms the audio cache. `render-windows-fast` selects the audited D3D11/NVENC configuration: an adaptive number of drawing workers, direct cached-file serving, a continuous audio-only worker and Windows Media Foundation AAC. Use `--jobs N` to change the drawing-worker count. For short previews (`--duration`) or non-NVIDIA machines, use `render --backend portable` or the automatic `render` command above.
 
+On laptops with integrated and NVIDIA graphics, the native Windows renderer asks ANGLE to use the NVIDIA adapter. If updating an existing build, rerun `prepare-windows-fast` on Windows before repackaging the desktop app so the updated native modules are included.
+
 This native configuration exported the tested 318.85-second, nine-round match in **44.42 seconds for the complete command (7.18×)**. All 19,131 round/master frames, all 160 reference-image samples, complete audio timing and all nine decoded round-audio coverage/alignment checks passed. Original high graphics, 1080p60 and AA4 are retained. The AAC encoder and signed 16-bit input conversion are documented in the [Windows notes](notes/windows-support.md#paused-handoff). Speed varies with hardware and replay; Windows 10× was not achieved.
 
 **Speed optimization is paused at the user's request (2026-11-04).** The public fast launcher now selects the audited configuration above; later D3D12/compute experiments remain available through the lower-level native commands. A standalone native installer and validation on other Windows machines remain unfinished.

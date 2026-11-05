@@ -40,7 +40,15 @@ struct AsyncEncoder:VideoEncoder{
   std::mutex mutex;std::condition_variable changed;std::thread worker;bool finishing=false,aborting=false;std::string failure;
   AsyncEncoder(int w,int h,int rate):width(w),height(h),fps(rate){
     display=P<PFNEGLGETCURRENTDISPLAYPROC>("eglGetCurrentDisplay")();EGLAttrib e=0,d=0;
-    Check(P<PFNEGLQUERYDISPLAYATTRIBEXTPROC>("eglQueryDisplayAttribEXT")(display,EGL_DEVICE_EXT,&e),"Query EGL device failed");Check(P<PFNEGLQUERYDEVICEATTRIBEXTPROC>("eglQueryDeviceAttribEXT")((EGLDeviceEXT)e,EGL_D3D11_DEVICE_ANGLE,&d),"Query D3D device failed");device=reinterpret_cast<ID3D11Device*>(d);device->GetImmediateContext(&immediate);Check(SUCCEEDED(immediate.As(&protection)),"D3D multithread protection unavailable");protection->SetMultithreadProtected(TRUE);
+    Check(P<PFNEGLQUERYDISPLAYATTRIBEXTPROC>("eglQueryDisplayAttribEXT")(display,EGL_DEVICE_EXT,&e),"Query EGL device failed");Check(P<PFNEGLQUERYDEVICEATTRIBEXTPROC>("eglQueryDeviceAttribEXT")((EGLDeviceEXT)e,EGL_D3D11_DEVICE_ANGLE,&d),"Query D3D device failed");device=reinterpret_cast<ID3D11Device*>(d);
+    // ANGLE can fall back to its default adapter if the requested vendor is absent.
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC description{};
+    Check(SUCCEEDED(device.As(&dxgi)) && SUCCEEDED(dxgi->GetAdapter(&adapter)) &&
+          SUCCEEDED(adapter->GetDesc(&description)), "Cannot identify ANGLE's graphics adapter");
+    Check(description.VendorId == 0x10de, "ANGLE opened a non-NVIDIA graphics adapter. Check that Windows can see the NVIDIA GPU.");
+    device->GetImmediateContext(&immediate);Check(SUCCEEDED(immediate.As(&protection)),"D3D multithread protection unavailable");protection->SetMultithreadProtected(TRUE);
     Check(!d3d12||Enabled("REPLAY_WINDOWS_FENCE"),"D3D12 encoding requires REPLAY_WINDOWS_FENCE=1");
     Check(!computeConversion||(d3d12&&nv12),"Compute conversion requires D3D12 and NV12");
     Check(!computeInPlace||computeConversion,"In-place conversion requires compute conversion");

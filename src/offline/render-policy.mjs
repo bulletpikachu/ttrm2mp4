@@ -79,6 +79,7 @@ export async function probeWorkerCount({jobs,explicit=false,probe,probeGroup,onR
 // The audited D3D11 configuration, shared by startup checks and the launcher.
 export function windowsFastEnvironment(env=process.env) {
   return { ...env,
+      NODE_WEBGL_BACKEND: 'd3d11', REPLAY_WINDOWS_NVIDIA_ADAPTER: '1',
       REPLAY_WINDOWS_GPU_BATCH: '4', REPLAY_WINDOWS_CAVLC: '1',
       REPLAY_V8_FLAGS: '--max-valid-polymorphic-map-count=16', REPLAY_WINDOWS_COMPOSE_FAST: '1',
       REPLAY_WINDOWS_DIRECT_TEXTURE: '1',

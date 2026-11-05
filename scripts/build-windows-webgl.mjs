@@ -30,6 +30,19 @@ function replace(needle, replacement) { if (source.split(needle).length !== 2) t
 const shaderBuildHash=createHash('sha256');
 for(const name of ['libEGL','libGLESv2','libANGLE'])shaderBuildHash.update(await readFile(path.join(libraries,name+'.lib')));
 replace('#include <vector>',`#include <vector>\n#define REPLAY_SHADER_CACHE_BUILD "${shaderBuildHash.digest('hex')}"\n#include "${path.join(root,'src/experimental/native/windows-shader-cache.inc').replaceAll('\\','/')}"`);
+// NVENC consumes textures on ANGLE's device, so choose the NVIDIA adapter
+// when creating the display, before any WebGL contexts or textures exist.
+const displayAttribs = '  if (!BackendAttribs(backend, attrs, err)) return false;';
+replace(displayAttribs, `${displayAttribs}
+  const char* nvidia = getenv("REPLAY_WINDOWS_NVIDIA_ADAPTER");
+  if (nvidia && strcmp(nvidia, "1") == 0) {
+    if (backend != "d3d11" || !HasClientExtension("EGL_ANGLE_platform_angle_device_id")) {
+      err = "ANGLE D3D11 adapter selection unavailable";
+      return false;
+    }
+    // On D3D11, the high part is the PCI vendor ID and zero matches any device ID.
+    attrs.insert(attrs.end() - 1, {EGL_PLATFORM_ANGLE_DEVICE_ID_HIGH_ANGLE, 0x10de});
+  }`);
 replace('if (TryInitDisplay(c, api, err)) return DisplayInfo(env);','if (TryInitDisplay(c, api, err)) { try { ReplayShaderCache::Start(g_display.dpy,egl.GetProcAddress,g_display.vendor,g_display.version); } catch (const std::exception& error) { return Throw(env,error.what()); } return DisplayInfo(env); }');
 replace('NAPI_MODULE_INIT() {', `static napi_value ReplayEGL(napi_env env,napi_callback_info){napi_value out;napi_create_external(env,(void*)egl.GetProcAddress,nullptr,nullptr,&out);return out;}\nNAPI_MODULE_INIT() {`);
 replace('  add("hasProc", GetProcAvailable);', '  add("hasProc", GetProcAvailable);\n  add("_replayEGL", ReplayEGL);\n  add("_replayShaderCacheStats", ReplayShaderCache::Stats);');
