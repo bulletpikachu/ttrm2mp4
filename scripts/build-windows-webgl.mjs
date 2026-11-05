@@ -41,6 +41,6 @@ await cp(path.join(dependency, 'dist'), path.join(target, 'dist'), { recursive: 
 const loaderFile = path.join(target, 'dist/native.js');
 let loader = await readFile(loaderFile, 'utf8');
 if (loader.split('native = gypBuild(packageRoot);').length !== 2) throw Error('Pinned JS loader mismatch');
-loader = loader.replace('native = gypBuild(packageRoot);', `native = require(${JSON.stringify(binary)});`);
+loader = loader.replace('native = gypBuild(packageRoot);', `native = require(join(packageRoot, 'node-webgl-windows.node'));`);
 await writeFile(loaderFile, loader); await writeFile(path.join(target, 'package.json'), '{"type":"module","private":true}\n');
 console.log('Built local Windows ANGLE binding with EGL interop access; installed dependency unchanged.');

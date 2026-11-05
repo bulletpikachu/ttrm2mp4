@@ -8,12 +8,12 @@ window.__createRawEncoder = ({width,height,fps}) => {
   const gpuBatch=Number(process.env.REPLAY_GPU_BATCH||1);
   const surfaceCount=Number(process.env.REPLAY_SURFACES||32);
   const directTexture=process.env.REPLAY_DIRECT_TEXTURE==='1';
-  const implicitResolve=process.env.REPLAY_IMPLICIT_RESOLVE==='1';
+  const implicitResolveRequested=process.env.REPLAY_IMPLICIT_RESOLVE==='1';
   const packedNV12=process.env.REPLAY_PACKED_NV12==='1'&&width%4===0;
   if(packedNV12&&process.env.REPLAY_CENTRAL_ENCODER)throw Error('Packed NV12 requires the local native encoder');
   const codecWorkerQos=process.env.REPLAY_CODEC_WORKER_QOS||null;
   if(codecWorkerQos&&!['interactive','initiated'].includes(codecWorkerQos))throw Error('REPLAY_CODEC_WORKER_QOS must be interactive or initiated');
-  if(implicitResolve&&!directTexture)throw Error('Implicit resolve requires the direct game texture');
+  if(implicitResolveRequested&&!directTexture)throw Error('Implicit resolve requires the direct game texture');
   if(!Number.isInteger(threads)||threads<1||threads>32)throw Error('REPLAY_X264_THREADS must be an integer between 1 and 32');
   if(!Number.isInteger(gpuBatch)||gpuBatch<1||gpuBatch>16)throw Error('REPLAY_GPU_BATCH must be an integer between 1 and 16');
   if(!Number.isInteger(surfaceCount)||surfaceCount<16||surfaceCount>96)throw Error('REPLAY_SURFACES must be an integer between 16 and 96');
@@ -26,6 +26,7 @@ window.__createRawEncoder = ({width,height,fps}) => {
   if(native.foreground?.view.width===width)throw Error('Native encoder foreground composition is not implemented');
   const gl=window.__nativeWebGLContext(native.app.view);
   if(!gl?._isWebGL2)throw Error('Native encoder requires native WebGL 2');
+  const implicitResolve=implicitResolveRequested&&!!gl._drawingBuffer.msFbo&&gl._drawingBuffer.samples>0;
   const initialErrors=[];for(let error=gl.getError();error;error=gl.getError())initialErrors.push(error);
   function saved(operation){
     const program=gl.getParameter(gl.CURRENT_PROGRAM),draw=gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING),read=gl.getParameter(gl.READ_FRAMEBUFFER_BINDING),vao=gl.getParameter(gl.VERTEX_ARRAY_BINDING),active=gl.getParameter(gl.ACTIVE_TEXTURE),viewport=gl.getParameter(gl.VIEWPORT),mask=gl.getParameter(gl.COLOR_WRITEMASK);
@@ -98,11 +99,16 @@ window.__createRawEncoder = ({width,height,fps}) => {
     game=texture();gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
     if(directTexture){
       const binding=gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING),db=gl._drawingBuffer;
+      if(!db.msFbo){
+        // Without a multisample buffer, the current image is in the attachment
+        // we are about to replace.
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+        gl.copyTexSubImage2D(gl.TEXTURE_2D,0,0,0,0,0,width,height);
+      }
       gl._n.bindFramebuffer(gl.DRAW_FRAMEBUFFER,db.fbo);gl._n.framebufferTexture2D(gl.DRAW_FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,game._id,0);
       if(gl._n.checkFramebufferStatus(gl.DRAW_FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Direct game texture framebuffer is incomplete');
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,binding);
       if(implicitResolve){
-        if(!db.msFbo||db.samples<1)throw Error('Implicit resolve requires existing multisample antialiasing');
         // Seed the replacement with the previous resolved canvas, preserving
         // the menu/game transition before the first exported frame.
         db.resolve();window.__nativeGLFlush?.();bridge.barrier();

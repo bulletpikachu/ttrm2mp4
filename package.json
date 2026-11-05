@@ -1,9 +1,11 @@
 {
   "name": "replay-render",
   "version": "1.0.0",
-  "description": "Render .ttrm replays to MP4 using TETR.IO’s native WebGL player",
+  "description": "Render .ttrm replays to MP4 using TETR.IO\u2019s native WebGL player",
   "scripts": {
-    "render": "node src/render.mjs",
+    "render": "node src/render-auto.mjs",
+    "render-portable": "node src/render.mjs",
+    "test:selection": "node scripts/check-render-selection.mjs",
     "render-fast": "node src/render-fast.mjs",
     "render-windows-fast": "node src/render-windows-fast.mjs",
     "prepare-windows-fast": "node scripts/prepare-windows-fast.mjs",
@@ -13,19 +15,35 @@
     "prepare-native": "node scripts/prepare-native.mjs",
     "prepare-fast": "node scripts/prepare-fast.mjs",
     "render-parallel": "node src/render-parallel.mjs",
-    "render-native-parallel": "node src/render-native-parallel.mjs"
+    "render-native-parallel": "node src/render-native-parallel.mjs",
+    "desktop": "npm run build:desktop && electron .",
+    "build:desktop": "node scripts/build-desktop.mjs",
+    "check:desktop": "tsc -p desktop/tsconfig.json",
+    "package:desktop": "npm run build:desktop && node scripts/package-desktop.mjs",
+    "test:desktop": "node scripts/check-desktop.mjs",
+    "test:desktop-jobs": "node scripts/check-desktop-jobs.mjs",
+    "test:setup": "node scripts/check-client-setup.mjs",
+    "test:desktop-setup": "node scripts/check-desktop-setup.mjs"
   },
   "type": "module",
   "dependencies": {
     "ffmpeg-static": "^5.3.0",
-    "playwright-core": "^1.64.1"
+    "playwright-core": "^1.64.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "@onirenaud/node-webgl": "0.2.0"
   },
   "private": true,
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
-    "@onirenaud/node-webgl": "0.2.0",
-    "electron": "^45.2.1"
-  }
+    "@electron/packager": "^20.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "electron": "^45.2.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "main": "desktop/main.cjs"
 }

@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import {appearanceResponse} from './appearance.mjs';
 import {patchAudioOnlyParticles} from './audio-particles.mjs';
 
-export function patchClient(source,{audioOnlyParticles=false}={}) {
+export function patchClient(source,{audioOnlyParticles=false,appearance=null}={}) {
   function replace(needle, replacement) {
     if (source.split(needle).length !== 2) throw Error(`Pinned client patch mismatch: ${needle.slice(0, 80)}`);
     source = source.replace(needle, replacement);
@@ -18,6 +19,18 @@ export function patchClient(source,{audioOnlyParticles=false}={}) {
   replace('await d(t);const u=await e.decodeAudioData(s.get(t).slice(0));','await d(t);const u=window.__offlineDecodedBgm?.get(t)??await e.decodeAudioData(s.get(t).slice(0));');
   replace('BgmLoadFile:d,BgmSetVolume:', 'BgmLoadFile:d,BgmPreloadDecoded:async t=>{await d(t);const buffers=window.__offlineDecodedBgm??=new Map;if(!buffers.has(t))buffers.set(t,await e.decodeAudioData(s.get(t).slice(0)))},BgmSetVolume:');
   replace('i||document.body.classList.contains("banstatus_restrict")||lr.connect()', 'void 0');
+  const video=appearance?.video;
+  if (video && Object.keys(video).length) {
+    replace('function gt(){const e=localStorage.getItem("userConfig");',
+      'function gt(){__offlineLoadConfig();Object.assign(ot.video,'+JSON.stringify(video)+')}function __offlineLoadConfig(){const e=localStorage.getItem("userConfig");');
+  }
+  const minos=appearance?.assets?.['/res/skins/minos/connected.png'];
+  const ghost=appearance?.assets?.['/res/skins/ghost/connected.png'];
+  if (minos || ghost) {
+    const start='Mc=(()=>{function e(e,t,n=255,s=1,i={}){let a=Ic[e]';
+    const connected=(minos?'Ic.tetrio=Ic.connected_test;':'')+(ghost?'Ec.tetrio=Ec.connected_test;':'');
+    replace(start,'Mc=(()=>{'+connected+start.slice('Mc=(()=>{'.length));
+  }
   return audioOnlyParticles?patchAudioOnlyParticles(source):source;
 }
 
@@ -30,7 +43,7 @@ export async function createLocalClientStore(directory, options={}) {
     const space = key.indexOf(' '), url = new URL(key.slice(space + 1));
     byPath.set(`${key.slice(0, space)} ${url.origin}${url.pathname}`, value);
   }
-  const bodies = new Map(), missing = new Set();
+  const bodies = new Map(), missing = new Set(), appearanceUsed = new Set();
   async function body(entry) {
     if (!bodies.has(entry.hash)) {
       const bytes = await readFile(path.join(directory, 'objects', entry.hash));
@@ -39,8 +52,10 @@ export async function createLocalClientStore(directory, options={}) {
     }
     return bodies.get(entry.hash);
   }
-  return {manifest,missing,async response(method,address){
+  return {manifest,missing,appearanceUsed,async response(method,address){
     const url=new URL(address),key=`${method} ${url.href}`;
+    const custom=method==='GET'?appearanceResponse(options.appearance,url):null;
+    if(custom){appearanceUsed.add(url.pathname);return custom;}
     const entry=entries.get(key)||byPath.get(`${method} ${url.origin}${url.pathname}`);
     if(!entry){missing.add(key);return null;}
     let bytes=await body(entry);
@@ -49,14 +64,16 @@ export async function createLocalClientStore(directory, options={}) {
   }};
 }
 
-export async function attachLocalClient(context, directory, options={}, electronApp=null) {
+export async function attachLocalClient(context, directory, {appearanceFile,...options}={}, electronApp=null) {
   let cache;
   if(electronApp){
-    const manifest=await electronApp.evaluate(async(_,config)=>global.__replayInstallLocalClient(config),{directory,options});
-    const missing=new Set();
-    cache={manifest,missing,transport:'electron-protocol',async refresh(){
-      const keys=await electronApp.evaluate(()=>global.__replayLocalClientMissing());
-      for(const key of keys)missing.add(key);
+    const {audioOnlyParticles}=options;
+    const manifest=await electronApp.evaluate(async(_,config)=>global.__replayInstallLocalClient(config),{directory,appearanceFile,options:{audioOnlyParticles}});
+    const missing=new Set(),appearanceUsed=new Set();
+    cache={manifest,missing,appearanceUsed,transport:'electron-protocol',async refresh(){
+      const stats=await electronApp.evaluate(()=>global.__replayLocalClientStats());
+      for(const key of stats.missing)missing.add(key);
+      for(const address of stats.appearanceUsed)appearanceUsed.add(address);
     }};
   }else{
     cache=await createLocalClientStore(directory,options);cache.transport='playwright-route';

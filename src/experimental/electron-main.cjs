@@ -6,7 +6,10 @@ global.__replayInstallLocalClient=async config=>{
   global.__replayLocalClientStore=await installElectronClient(require('electron').session.defaultSession,config);
   return global.__replayLocalClientStore.manifest;
 };
-global.__replayLocalClientMissing=()=>[...global.__replayLocalClientStore.missing];
+global.__replayLocalClientStats=()=>{
+  const {missing,appearanceUsed}=global.__replayLocalClientStore;
+  return {missing:[...missing],appearanceUsed:[...appearanceUsed]};
+};
 app.setPath('userData',require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'replay-electron-')));
 if(process.platform==='darwin')app.commandLine.appendSwitch('use-angle','metal');
 if(process.env.REPLAY_CHROMIUM_SOFTWARE==='1')app.commandLine.appendSwitch('disable-gpu');

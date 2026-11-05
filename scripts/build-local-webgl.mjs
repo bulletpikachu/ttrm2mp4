@@ -24,6 +24,6 @@ const[code]=await once(child,'exit');if(code!==0)throw Error('Local ANGLE bindin
 await cp(path.join(dependency,'dist'),path.join(target,'dist'),{recursive:true});
 const nativeFile=path.join(target,'dist/native.js');let loader=await readFile(nativeFile,'utf8');
 if(loader.split('native = gypBuild(packageRoot);').length!==2)throw Error('Local binding loader patch mismatch');
-loader=loader.replace('native = gypBuild(packageRoot);',`native = require(${JSON.stringify(binary)});`);await writeFile(nativeFile,loader);
+loader=loader.replace('native = gypBuild(packageRoot);',`native = require(join(packageRoot, 'node-webgl-local.node'));`);await writeFile(nativeFile,loader);
 await writeFile(path.join(target,'package.json'),JSON.stringify({type:'module',private:true})+'\n');
 console.log('Local binding and mirrored JS adapter built; installed dependency remains unchanged.');

@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
-import { availableParallelism } from 'node:os';
+import {hostResources,resourceDefaults} from './render-policy.mjs';
 
 // Portable CPU fallback. Video and PCM still use the same controlled timeline.
-export function createFFmpegVideo(ffmpeg, writeVideo, threads = Math.max(1, Math.min(8, availableParallelism() - 1))) {
+export function createFFmpegVideo(ffmpeg, writeVideo, threads = resourceDefaults(hostResources()).portableThreads) {
   let active;
   return {
     threads,

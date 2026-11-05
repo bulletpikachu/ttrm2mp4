@@ -10,12 +10,15 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import {readAppearance} from './offline/appearance.mjs';
 import { attachLocalClient } from './offline/client.mjs';
 import {createContinuousAudio} from './offline/continuous-audio.mjs';
 import {createContinuousMux} from './offline/continuous-mux.mjs';
 import {createFFmpegVideo} from './offline/ffmpeg-video.mjs';
 import {closeElectron as shutdownElectron} from './offline/electron-shutdown.mjs';
 import {validateFrameWindow} from './offline/frame-ranges.mjs';
+
+import {resourcePath,defaultClientDirectory,audioCacheDirectory,electronExecutable,engineEnvironment,emitRenderEvent} from './offline/runtime.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 async function publishFile(source,target){
@@ -26,7 +29,7 @@ async function publishFile(source,target){
   }
 }
 async function shareFile(source,target){try{await link(source,target)}catch(error){if(error.code!=='EXDEV')throw error;await copyFile(source,target,fsConstants.COPYFILE_EXCL)}}
-const help = `Usage: npm run render -- input.ttrm [output.mp4] [options]
+const help = `Usage: npm run render-portable -- input.ttrm [output.mp4] [options]
 
 Offline, frame-by-frame export using the pinned native TETR.IO WebGL engine.
 First run: npm run prepare-client -- example.ttrm (downloads client/assets once).
@@ -70,7 +73,8 @@ async function main() {
   const { values: options, positionals } = parseArgs({ allowPositionals: true, options: {
     width: { type: 'string', default: '1920' }, height: { type: 'string', default: '1080' },
     fps: { type: 'string', default: '60' }, round: { type: 'string' }, duration: { type: 'string' },
-    client: { type: 'string', default: 'client' }, chrome: { type: 'string' }, headed: { type: 'boolean' },
+    appearance: { type: 'string' },
+    client: { type: 'string', default: defaultClientDirectory }, chrome: { type: 'string' }, headed: { type: 'boolean' },
     'worker-rounds':{type:'string'}, 'worker-audio':{type:'string'}, 'worker-video-dir':{type:'string'},
     'worker-frames':{type:'string'},
     deterministic:{type:'boolean'},
@@ -88,8 +92,8 @@ async function main() {
   const windowsEncoder=!!options['windows-encoder'];
   const cpuEncoder=!!(options['native-encoder']||options['pbo-encoder']||windowsEncoder);
   const localWebGL=process.env.REPLAY_LOCAL_WEBGL==='1';
-  const webglModule=windowsEncoder?path.resolve(here,'../.native-deps/node-webgl-windows/dist/index.js'):localWebGL?path.resolve(here,'../.native-deps/node-webgl-local/dist/index.js'):path.resolve('node_modules/@onirenaud/node-webgl/dist/index.js');
-  const angleLibrary=localWebGL?path.resolve(here,'../.native-deps/node-webgl-local/node-webgl-local.node'):path.resolve('node_modules/@onirenaud/node-webgl/prebuilds/darwin-arm64/@onirenaud+node-webgl.node');
+  const webglModule=windowsEncoder?path.resolve(here,'../.native-deps/node-webgl-windows/dist/index.js'):localWebGL?path.resolve(here,'../.native-deps/node-webgl-local/dist/index.js'):resourcePath('node_modules/@onirenaud/node-webgl/dist/index.js');
+  const angleLibrary=localWebGL?path.resolve(here,'../.native-deps/node-webgl-local/node-webgl-local.node'):resourcePath('node_modules/@onirenaud/node-webgl/prebuilds/darwin-arm64/@onirenaud+node-webgl.node');
   if(localWebGL&&!options['native-webgl'])throw Error('REPLAY_LOCAL_WEBGL requires native-webgl');
   if(process.env.REPLAY_GL_NO_ERROR==='1')throw Error('The no-error context experiment failed the full visual audit. Use the normal render-fast configuration.');
   if(process.env.REPLAY_GL_ASYNC==='1'&&process.env.REPLAY_GL_BATCH!=='1')throw Error('REPLAY_GL_ASYNC requires REPLAY_GL_BATCH=1');
@@ -182,10 +186,12 @@ async function main() {
   const interrupt = () => { browser?.close().catch(() => {});electronApp?.process().kill('SIGTERM'); };
   process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
   try {
+    emitRenderEvent('stage',{stage:'Loading game files'});
     console.log('Loading pinned native client. Browser networking is disabled.');
     if(options.engine==='electron') {
-      const {default:electronBinary}=await import('electron');
-      electronApp=await _electron.launch({executablePath:electronBinary,args:[path.join(here,options['surface-stream']?'experimental/surface-stream-main.cjs':options['surface-encoder']?'experimental/surface-main.cjs':'experimental/electron-main.cjs')],env:{...process.env,...(options['surface-encoder']?{REPLAY_SURFACE_CONFIG:JSON.stringify({encoder:options['surface-encoder'],output:path.join(temp,'video.h264'),width,height,fps,reference:options['surface-reference']?path.resolve(options['surface-reference']):null,qualitySamples:options['quality-samples']?path.resolve(options['quality-samples']):null,overwrite:!!options.overwrite})}:{})}});
+      const electronBinary=await electronExecutable();
+      const engineEntry=path.join(here,options['surface-stream']?'experimental/surface-stream-main.cjs':options['surface-encoder']?'experimental/surface-main.cjs':'experimental/electron-main.cjs');
+      electronApp=await _electron.launch({executablePath:electronBinary,args:[path.join(here,options['surface-stream']?'experimental/surface-stream-main.cjs':options['surface-encoder']?'experimental/surface-main.cjs':'experimental/electron-main.cjs')],env:{...engineEnvironment(engineEntry),...(options['surface-encoder']?{REPLAY_SURFACE_CONFIG:JSON.stringify({encoder:options['surface-encoder'],output:path.join(temp,'video.h264'),width,height,fps,reference:options['surface-reference']?path.resolve(options['surface-reference']):null,qualitySamples:options['quality-samples']?path.resolve(options['quality-samples']):null,overwrite:!!options.overwrite})}:{})}});
     }
     else browser = await chromium.launch({
       ...(options.chrome ? { executablePath: options.chrome } : { channel: 'chrome' }), headless: !options.headed,
@@ -196,7 +202,8 @@ async function main() {
     const context = electronApp ? electronApp.context() : await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'America/Los_Angeles' });
     const audioOnlyParticles=windowsEncoder&&selectedRounds?.length===0&&process.env.REPLAY_WINDOWS_AUDIO_PARTICLES==='1';
     const nativeClient=windowsEncoder&&process.env.REPLAY_WINDOWS_NATIVE_CLIENT==='1';
-    const cache = await attachLocalClient(context, directory,{audioOnlyParticles},nativeClient?electronApp:null);
+    const appearance=await readAppearance(options.appearance);
+    const cache = await attachLocalClient(context, directory,{audioOnlyParticles,appearance,appearanceFile:options.appearance&&path.resolve(options.appearance)},nativeClient?electronApp:null);
     await context.addInitScript({ content: `localStorage.setItem("feecofScore","1500000");window.__offlineMode=true;window.__audioLength=${Math.min(limitSeconds || maxSeconds, maxSeconds) + 5};` });
     if(deterministic)await context.addInitScript({path:path.join(here,'offline/deterministic.js')});
     if(process.env.REPLAY_GL_BATCH==='1'){
@@ -208,7 +215,7 @@ async function main() {
     await context.addInitScript({ path: path.join(here, 'offline/clock.js') });
     if(process.env.REPLAY_AUDIO_DECODE_CACHE==='1'){
       if(options.engine!=='electron')throw Error('Decoded audio caching requires Electron');
-      await context.addInitScript({content:`window.__audioDecodeCacheDirectory=${JSON.stringify(path.join(directory,'decoded-audio'))};\n`+await readFile(path.join(here,'offline/audio-decode-cache.js'),'utf8')});
+      await context.addInitScript({content:`window.__audioDecodeCacheDirectory=${JSON.stringify(audioCacheDirectory)};\n`+await readFile(path.join(here,'offline/audio-decode-cache.js'),'utf8')});
     }
     if(options['export-rounds'])await context.addInitScript({content:(await readFile(path.join(here,'offline/audio-graph.js'),'utf8'))+'\n'+(await readFile(path.join(here,'offline/audio.js'),'utf8'))});
     else await context.addInitScript({ path: path.join(here, 'offline/audio.js') });
@@ -321,6 +328,7 @@ async function main() {
         const publication=(async()=>{
           await runEncoder(stem+'.h264',stem+'.f32',staged,fps,data.sampleRate,false,data.endFrame-data.startFrame);await publishFile(staged,target);
           report.publishedSeconds=(performance.now()-wallStart)/1000;
+          emitRenderEvent('round',{round:data.round,path:target,partial:data.partial});
           console.log(`Round ${data.round}${data.partial?' preview':''} saved: ${target}`);
           if(process.connected)process.send({type:'round',report});
         })().catch(error=>{roundPublicationFailure??=error});
@@ -333,6 +341,7 @@ async function main() {
     }
     let previousRound;
     await page.exposeBinding('__renderProgress', (_, data) => {
+      emitRenderEvent('progress',{...data,totalSeconds:limitSeconds?Math.min(expected,limitSeconds):expected,roundCount:rounds.length});
       if (data.stage) { console.log(`${((performance.now() - exportStart) / 1000).toFixed(2)}s: ${data.stage}`); return; }
       if (data.round !== previousRound) { console.log(`Rendering round ${data.round || round || 1} / ${rounds.length}…`); previousRound = data.round; }
     });
@@ -372,6 +381,11 @@ async function main() {
     if(options['native-webgl'])await page.evaluate(()=>{window.__exportCPUStart=process.cpuUsage()});
     const result = await page.evaluate(options => __exportMovie(options), { fps, width, height, limitSeconds, maxSeconds, roundCount: rounds.length, queue, encoderMode: options.encoder, latencyMode: options.latency, encoderRate, selectedRounds, deterministic,qualityInterval,videoOnlyWorker,frameWindow,stopAfterSelected:windowsEncoder&&process.env.REPLAY_WORKER_PREFIX==='1',roundFrameLimits:rounds.map(round=>Math.max(...round.map(player=>player.replay.frames))) });
     result.graphicsPreset=await page.evaluate(()=>window.__native.settings.video.graphics);
+    if (appearance) {
+      result.appearance={
+        video:await page.evaluate(keys=>Object.fromEntries(keys.map(key=>[key,window.__native.settings.video[key]])),Object.keys(appearance.video)),
+      };
+    }
     if(audioOnlyParticles&&(!result.audioOnly||result.audioOnlyParticleUpdates?.enabled!==true))throw Error('Audio-only particle optimization was not installed');
     if(!audioOnlyParticles&&result.audioOnlyParticleUpdates)throw Error('Audio-only particle optimization reached a drawing worker');
     if(process.env.REPLAY_AUDIO_DECODE_CACHE==='1')result.audioDecodeCache=await page.evaluate(()=>{if(window.__audioDecodeCacheFailure)throw Error(window.__audioDecodeCacheFailure);return window.__audioDecodeCacheMetrics});
@@ -411,6 +425,7 @@ async function main() {
     const renderSeconds = (performance.now() - exportStart) / 1000;
     mark('exportVerified');
     await cache.refresh?.();
+    if(appearance)result.appearance.assets=[...cache.appearanceUsed].sort();
     const missingAssets = [...cache.missing].filter(key => /https:\/\/tetr\.io\/res\//.test(key) && !/\/res\/supporter-perk-/.test(key));
     if (missingAssets.length) throw Error(`Offline assets missing. Refresh the local client:\n${missingAssets.join('\n')}`);
     let audioSourcePublished=false;
@@ -434,6 +449,7 @@ async function main() {
     const report = { input, output:selectedRounds===null?output:null, workerAudio:options['worker-audio']?path.resolve(options['worker-audio']):null, clientVersion: cache.manifest.hardVersion, networkingDisabled: true, width, height, fps, rounds:roundReports, ...result, renderSeconds, elapsedSeconds, hostTimings, speedup: result.duration / elapsedSeconds, renderSpeedup: result.duration / renderSeconds, missingAssets, clientErrors };
     report.localClientTransport=cache.transport;
     await writeFile(output.replace(/\.mp4$/i, '.json'), JSON.stringify(report, null, 2) + '\n');
+    if(selectedRounds===null)emitRenderEvent('completed',{output,report:output.replace(/\.mp4$/i,'.json')});
     if(selectedRounds!==null)console.log(`Worker finished ${result.duration.toFixed(2)}s timeline and ${result.encodedCount} selected frames in ${elapsedSeconds.toFixed(2)}s. No full video was produced by this worker.`);
     else console.log(`Saved ${output}${options['render-side']?' (diagnostic partial-board output; not a complete game export)':''}\n${result.duration.toFixed(2)}s video in ${elapsedSeconds.toFixed(2)}s total (${report.speedup.toFixed(2)}× real time; rendering ${report.renderSpeedup.toFixed(2)}×).`);
   } finally {
@@ -448,4 +464,4 @@ async function main() {
     await rm(temp, { recursive: true, force: true });process.removeListener('SIGINT', interrupt);process.removeListener('SIGTERM', interrupt);
   }
 }
-main().catch(e => { console.error(`Error: ${e.stack || e.message}`);process.exitCode = 1; }).finally(()=>{if(process.connected)process.disconnect()});
+main().catch(e => { emitRenderEvent('error',{message:e.message});console.error(`Error: ${e.stack || e.message}`);process.exitCode = 1; }).finally(()=>{if(process.connected)process.disconnect()});

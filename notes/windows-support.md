@@ -10,7 +10,7 @@ Use the fully audited **D3D11/NVENC, three drawing workers plus a complete audio
 
 The accepted local artifacts are [the full match](../output/windows-native-mf-local-client-particles.mp4), [the nine round clips](../output/windows-native-mf-local-client-particles-rounds/), [the report](../output/windows-native-mf-local-client-particles.json) and its adjacent audit logs/JSON files. These outputs, the replay, client/assets, dependencies and native binaries are ignored by Git; a fresh checkout does not contain them.
 
-The public `render-windows-fast` launcher still selects the 98.01-second browser-video pipeline. The 44.42-second native command is a separate prepared-machine experimental route, requiring NVIDIA NVENC and the native audio/WebGL/encoder builds described below. There is no completed standalone native installer or second-machine Windows validation. Mac settings/builds remain separate; Mac performance was not revalidated here.
+The public `render-windows-fast` launcher now selects the audited 44.42-second D3D11/NVENC configuration with an adaptive drawing-worker count and the complete audio leader. Use `--jobs 3` to reproduce the benchmark concurrency. `prepare-windows-fast` builds the required audio/WebGL/encoder modules and warms the audio cache. NVIDIA NVENC is required; use the portable `render` command on other GPUs. The launcher fixes the audited environment settings, including disabling later D3D12/compute/frame-range experiments; use the lower-level commands below for those experiments. There is no completed standalone native installer or second-machine Windows validation. Mac settings/builds remain separate; Mac performance was not revalidated here.
 
 Recent shader, scheduling, queue and context-sharing experiments did not establish a reliable improvement over 44.42 seconds. The final sections record their exact timings, retained code/flags and verification limits. They are not new recommendations. Reaching 10× on this replay would require about 31.89 seconds, another 28% reduction in elapsed time; there is no demonstrated implementation that achieves that. Resume speed work only if explicitly requested. Packaging and broader machine/GPU testing remain possible separate work, with no new optimization run started as part of this handoff.
 
@@ -399,7 +399,7 @@ $env:REPLAY_WINDOWS_FRAME_RANGES='0'
 npm run render-native-parallel -- C:/path/example.ttrm output/match.mp4 --backend windows --jobs 3
 ```
 
-The public `render-windows-fast` browser command and Mac defaults are unchanged. Windows 10× would require about **31.89 seconds** for this match and remains an open goal. The combined candidate's drawing workers still use about 16.84–25.67 seconds of main-thread CPU and wait 5.03–6.09 seconds for encoder surfaces. Direct file serving reduces startup overhead; it does not eliminate those remaining costs.
+This recipe is now the public `render-windows-fast` default; Mac defaults are unchanged. Windows 10× would require about **31.89 seconds** for this match and remains an open goal. The combined candidate's drawing workers still use about 16.84–25.67 seconds of main-thread CPU and wait 5.03–6.09 seconds for encoder surfaces. Direct file serving reduces startup overhead; it does not eliminate those remaining costs.
 
 ## Follow-up profiling and rejected scheduling experiments
 
@@ -464,7 +464,7 @@ The real-game `windows-native-inplace-preview` exported **1,203 frames / 20.05 s
 
 The final full-match timing, `windows-native-inplace-three`, completed in **52.2359 seconds externally** (51.43 internally), with all nine round files, 19,131 reported frames, 15,304,800 source samples, the canonical PCM hash and no missing assets/client errors. This is slower than both the accepted D3D11 baseline and the separate-device converter. Its full output was **not** promoted or subjected to a new complete decoded-frame/image/audio audit after this negative timing result. Its established verification scope is the hardware suite and fully checked real-game transition preview, plus the full command's runtime integrity checks.
 
-The original **44.4207-second / 7.18× D3D11 result remains the fully audited recommendation**. Neither compute mode was made a public launcher default. The compute variants and their probes require the additional Windows SDK D3DCompiler library used by the build scripts; no CUDA SDK installation was introduced. The Mac native build/settings remain separate and were not benchmarked on this Windows machine.
+The original **44.4207-second / 7.18× D3D11 result remains the fully audited recommendation**. Neither compute mode is a public launcher default. The compute variants and their probes require the additional Windows SDK D3DCompiler library used by the build scripts; no CUDA SDK installation was introduced. The Mac native build/settings remain separate and were not benchmarked on this Windows machine.
 
 ## Wrap-up status
 

@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {RenderJobs,inspectReplay,validateSettings} from '../desktop/jobs.mjs';
+const temp=await mkdtemp(path.join(tmpdir(),'replay-job-check-'));
+try{
+  const client=path.join(temp,'client'),output=path.join(temp,'out');await mkdir(client);await mkdir(output);
+  await writeFile(path.join(client,'manifest.json'),JSON.stringify({format:1,entries:{}}));
+  const input=path.join(temp,'sample.ttrm');await writeFile(input,JSON.stringify({replay:{rounds:[[{replay:{frames:60,events:[]}},{replay:{frames:60,events:[]}}]]}}));
+  const file=await inspectReplay(input);assert.equal(file.rounds,1);assert.equal(file.duration,1);
+  await assert.rejects(inspectReplay(path.join(temp,'missing.txt')),/\.ttrm/);
+  const settings={clientDirectory:client,outputDirectory:output,backend:'auto',width:1920,height:1080,fps:60};
+  assert.throws(()=>validateSettings({...settings,width:1919}),/dimensions/);
+  assert.throws(()=>validateSettings({...settings,outputDirectory:'relative'}),/output folder/);
+  await writeFile(path.join(output,'sample.mp4'),'existing export');
+  const events=[],launches=[];
+  const jobs=new RenderJobs({root:temp,executable:process.execPath,userData:temp,spawnWorker:(_exe,args,options)=>{
+    launches.push(args);assert.equal(options.cwd,temp);assert.equal(options.env.ELECTRON_RUN_AS_NODE,'1');assert.equal(options.env.REPLAY_EVENTS,'1');
+    return spawn(process.execPath,['-e',`require('node:fs').writeFileSync(process.argv[1],'new export');process.send({type:'render-event',event:{type:'progress',seconds:1}});process.disconnect();`,args[2]],options);
+  }});
+  const appearance=path.join(temp,'imported appearance.json');
+  jobs.on('event',event=>events.push(event));jobs.start([file],{...settings,duration:2},appearance);
+  assert.throws(()=>jobs.start([file],settings),/already running/);
+  await jobs.active.done;
+  assert.equal(launches[0][launches[0].indexOf('--backend')+1],'auto');
+  assert(!launches[0].includes('--duration'),'Desktop jobs ignore old preview lengths');
+  assert.deepEqual(launches[0].slice(-2),['--appearance',appearance]);
+  assert.equal(await readFile(path.join(output,'sample.mp4'),'utf8'),'existing export');
+  assert.equal(events.find(e=>e.type==='finished').output,path.join(output,'sample-2.mp4'));
+  assert(events.some(e=>e.type==='progress'));assert(events.some(e=>e.type==='done'));assert.equal(jobs.active,null);
+  const failed=new RenderJobs({root:temp,executable:process.execPath,userData:temp,spawnWorker:(_exe,_args,options)=>spawn(process.execPath,['-e',"console.error('Encoder unavailable');process.exit(2)"],options)});
+  const failures=[];failed.on('event',event=>failures.push(event));failed.start([file],settings);await failed.active.done;
+  assert(failures.some(e=>e.type==='error'&&e.message.includes('Encoder unavailable')));assert(!failures.some(e=>e.type==='finished'));
+  console.log('PASS: replay/settings validation, structured progress, sequential job control, no-overwrite output naming, and worker-failure reporting.');
+}finally{await rm(temp,{recursive:true,force:true});}

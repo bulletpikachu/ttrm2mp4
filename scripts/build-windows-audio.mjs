@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import {discoverWindowsToolchain,windowsDelayLoadHook} from './windows-toolchain.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 if (process.platform !== 'win32' || process.arch !== 'x64') throw Error('This build script requires Windows x64');
 const cache = path.join(root, '.native-deps', 'windows-audio');
@@ -32,24 +33,15 @@ await download(archive, path.join(cache, archive));
 await download('win-x64/node.lib', path.join(cache, 'node.lib'));
 const headers = path.join(cache, `node-${version}`, 'include', 'node');
 try { await access(path.join(headers, 'node_api.h')); } catch { await run('tar.exe', ['-xzf', archive]); }
-const vswhere = 'C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe';
-const { execFileSync } = await import('node:child_process');
-const installations = JSON.parse(execFileSync(vswhere, ['-products', '*', '-format', 'json'], { encoding: 'utf8', windowsHide: true }));
-let compilerRoot;
-for (const installation of installations.reverse()) {
-  const directory = path.join(installation.installationPath, 'VC', 'Tools', 'MSVC');
-  try { const versions = (await readdir(directory)).sort().reverse(); compilerRoot = path.join(directory, versions[0]); await access(path.join(compilerRoot, 'bin/Hostx64/x64/cl.exe')); break; } catch { compilerRoot = null; }
-}
-if (!compilerRoot) throw Error('Install Visual Studio C++ Build Tools (x64)');
-const sdk = 'C:/Program Files (x86)/Windows Kits/10', sdkVersion = (await readdir(path.join(sdk, 'Lib'))).sort().reverse()[0];
+const {compilerRoot,sdkRoot:sdk,sdkVersion}=await discoverWindowsToolchain();
 const bin = path.join(compilerRoot, 'bin/Hostx64/x64');
 const env = { ...process.env, INCLUDE: [path.join(compilerRoot, 'include'), ...['ucrt', 'shared', 'um'].map(part => path.join(sdk, 'Include', sdkVersion, part))].join(';'),
   LIB: [path.join(compilerRoot, 'lib/x64'), ...['ucrt', 'um'].map(part => path.join(sdk, 'Lib', sdkVersion, part, 'x64'))].join(';') };
 for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key];
 env.Path = bin + ';' + process.env.Path;
-const hook = path.join(path.dirname(process.execPath), 'node_modules/npm/node_modules/node-gyp/src/win_delay_load_hook.cc');
+const hook = await windowsDelayLoadHook();
 const output = path.join(root, 'src/experimental/native/audio-mixer.node');
 await run(path.join(bin, 'cl.exe'), ['/nologo', '/O2', '/fp:strict', '/std:c++17', '/MD', '/EHsc', '/LD', '/DHOST_BINARY="node.exe"', `/I${headers}`,
   path.join(root, 'src/experimental/native/audio-mixer.cc'), hook, '/link', path.join(cache, 'node.lib'), 'delayimp.lib', '/DELAYLOAD:node.exe', `/OUT:${output}`, `/IMPLIB:${path.join(cache, 'audio-mixer.lib')}`], env);
-await writeFile(path.join(cache, 'build.json'), JSON.stringify({ version, compilerRoot, sdkVersion, floatingPoint: 'strict', output }, null, 2));
+await writeFile(path.join(cache, 'build.json'), JSON.stringify({ version, compilerRoot, sdkRoot:sdk, sdkVersion, floatingPoint: 'strict', output }, null, 2));
 console.log('Windows N-API audio mixer built with strict floating-point arithmetic.');
