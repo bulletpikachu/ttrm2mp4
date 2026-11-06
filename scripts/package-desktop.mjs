@@ -74,6 +74,19 @@ const targets=(process.argv.slice(2).length?process.argv.slice(2):[`${process.pl
   if(!match)throw Error(`Unknown package target ${target}. Use darwin-arm64 or win32-x64.`);
   return {platform:match[1],arch:match[2]};
 });
+if(targets.some(({platform,arch})=>platform==='win32'&&arch==='x64')){
+  // Packaging copies the prepared binaries verbatim. Check the strings used
+  // by the hybrid-GPU fix in both modules before replacing an existing build.
+  for(const [file,marker] of [
+    ['.native-deps/node-webgl-windows/node-webgl-windows.node','REPLAY_WINDOWS_NVIDIA_ADAPTER'],
+    ['.native-deps/windows-gpu/windows-encoder.node','NV_ENC_ERR_NO_ENCODE_DEVICE'],
+  ]){
+    let binary;
+    try{binary=await readFile(path.join(root,file));}
+    catch(error){if(error.code==='ENOENT')continue;throw error;}
+    if(!binary.includes(marker))throw Error(`Stale Windows native module: ${file}. Run npm run prepare-windows-fast -- replay.ttrm on Windows before packaging.`);
+  }
+}
 await deriveIcons();
 for(const {platform} of targets){
   const extension={darwin:'icns',win32:'ico'}[platform];

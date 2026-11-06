@@ -13,6 +13,18 @@ export function patchClient(source,{audioOnlyParticles=false,appearance=null}={}
   replace('const s={get id(){return n.id},get state()', 'const s={get _ctx(){return n},get id(){return n.id},get state()');
   replace('Zl=new o.Application({','window.__nativePixi=o,Zl=new o.Application({');
   replace('window.DEVHOOK_LOAD_REPLAY_RAW=e=>', `window.__native={get games(){return ha},get app(){return Zl},get foreground(){return ec},get pixi(){return window.__nativePixi},get settings(){return ot},get audio(){return La}};window.DEVHOOK_LOAD_REPLAY_RAW=e=>`);
+  // The countdown can reveal a replay board after the tick that updates animations.
+  // Give it the opening slide position before the exporter can draw it.
+  replace(
+    'case"slow":kc.animate(this.self.hm.H.holder,{0:{"pivot.y":Ss(Bc.x*this.H+1600)},1:{"pivot.y":Ss(Bc.x*this.Hh)}},.5,a(.06,.18,.42,1.16));break;',
+    `case "slow": {
+      const holder = this.self.hm.H.holder;
+      const startPivot = Ss(Bc.x * this.H + 1600);
+      if (this.options.display_replay) holder.pivot.y = startPivot;
+      kc.animate(holder, {0: {"pivot.y": startPivot}, 1: {"pivot.y": Ss(Bc.x * this.Hh)}}, .5, a(.06, .18, .42, 1.16));
+      break;
+    }`,
+  );
   replace('if(a<=0)return null;const r=e.createBufferSource();r.buffer=b;', 'if(a<=0)return null;if(window.__offlineSfx){const q={buffer:b,offset:o.offset,length:o.len,gain:a,pan:"minimal"!==ot.video.graphics?s:0,rate:"minimal"!==ot.video.graphics?i:1,time:e.currentTime,stop:Infinity};window.__offlineSfx.push(q);const token={};C.set(token,{stop:(t=0)=>{q.stop=Math.min(q.stop,t||e.currentTime)}});return token}const r=e.createBufferSource();r.buffer=b;');
   replace('BgmKill:h,BgmFadeOut:_', '_context:e,BgmKill:h,BgmFadeOut:_');
   replace('async function p(t,l,p){if(o===t)return;', 'function p(...args){const task=__offlinePlayBgm(...args),jobs=window.__offlineBgmJobs??=new Set;jobs.add(task);task.then(()=>jobs.delete(task),()=>jobs.delete(task));return task}async function __offlinePlayBgm(t,l,p){if(o===t)return;');
