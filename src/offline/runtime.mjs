@@ -24,6 +24,6 @@ export function forwardRenderEvents(child,extra={}){
 }
 // Preserve app/runtime location and IPC settings when dropping native tuning.
 export function portableEnvironment(env=process.env){
-  const retained=new Set(['REPLAY_RESOURCE_ROOT','REPLAY_USER_DATA','REPLAY_CLIENT_DIRECTORY','REPLAY_ELECTRON_EXECUTABLE','REPLAY_EVENTS','REPLAY_DESKTOP']);
+  const retained=new Set(['REPLAY_RESOURCE_ROOT','REPLAY_USER_DATA','REPLAY_CLIENT_DIRECTORY','REPLAY_ELECTRON_EXECUTABLE','REPLAY_EVENTS','REPLAY_DESKTOP','REPLAY_LEFT_PLAYER']);
   return Object.fromEntries(Object.entries(env).filter(([key])=>!key.startsWith('REPLAY_')||retained.has(key)));
 }

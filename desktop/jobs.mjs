@@ -10,7 +10,12 @@ export async function inspectReplay(file){
   const info=await stat(file);if(!info.isFile()||info.size>100*1024*1024)throw Error('Replay must be a file smaller than 100 MB');
   const replay=JSON.parse(await readFile(file,'utf8')),rounds=replay.replay?.rounds;
   if(!Array.isArray(rounds)||!rounds.length||rounds.some(round=>!Array.isArray(round)||round.length!==2||round.some(player=>!Number.isFinite(player.replay?.frames)||player.replay.frames<=0||!Array.isArray(player.replay.events))))throw Error('Expected a complete two-player match replay');
-  return {id:randomUUID(),path:file,name:path.basename(file),rounds:rounds.length,duration:rounds.reduce((sum,r)=>sum+Math.max(...r.map(p=>p.replay.frames))/60,0)};
+  const leaderboard=replay.replay.leaderboard;
+  const players=Array.isArray(leaderboard)&&leaderboard.length===2
+    &&leaderboard.every(player=>typeof player?.id==='string'&&player.id&&typeof player.username==='string')
+    &&leaderboard[0].id!==leaderboard[1].id
+    ?leaderboard.map(({id,username})=>({id,username})):undefined;
+  return {id:randomUUID(),path:file,name:path.basename(file),players,rounds:rounds.length,duration:rounds.reduce((sum,r)=>sum+Math.max(...r.map(p=>p.replay.frames))/60,0)};
 }
 export function validateSettings(settings){
   const {outputDirectory,clientDirectory,backend='auto',width=1920,height=1080,fps=60}=settings||{};
@@ -57,7 +62,7 @@ export class RenderJobs extends EventEmitter{
         await new Promise((resolve,reject)=>{
           const child=this.spawnWorker(this.executable,[path.join(this.root,'desktop/worker.cjs'),...args],{
             cwd:this.userData,detached:process.platform!=='win32',windowsHide:true,stdio:['ignore','pipe','pipe','ipc'],
-            env:{...process.env,ELECTRON_RUN_AS_NODE:'1',REPLAY_RESOURCE_ROOT:this.root,REPLAY_USER_DATA:this.userData,REPLAY_CLIENT_DIRECTORY:settings.clientDirectory,REPLAY_ELECTRON_EXECUTABLE:this.executable,REPLAY_EVENTS:'1',REPLAY_DESKTOP:'1'},
+            env:{...process.env,ELECTRON_RUN_AS_NODE:'1',REPLAY_RESOURCE_ROOT:this.root,REPLAY_USER_DATA:this.userData,REPLAY_CLIENT_DIRECTORY:settings.clientDirectory,REPLAY_ELECTRON_EXECUTABLE:this.executable,REPLAY_EVENTS:'1',REPLAY_DESKTOP:'1',REPLAY_LEFT_PLAYER:item.leftPlayer??''},
           });job.child=child;send({type:'worker-started',fileId:item.id,pid:child.pid});
           let errors='';
           child.stdout.on('data',data=>send({type:'log',fileId:item.id,message:String(data)}));

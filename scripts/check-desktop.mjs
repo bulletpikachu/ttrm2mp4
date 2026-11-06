@@ -47,6 +47,17 @@ try{
   await page.getByRole('button',{name:'Queue 0',exact:true}).waitFor();
   await page.evaluate(()=>{const transfer=new DataTransfer();transfer.items.add(window.dropFiles[0]);document.querySelector('.dropzone').dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));});
   await queue.getByText('replay.ttrm',{exact:true}).waitFor();
+  const [first,second]=replay.replay.leaderboard;
+  const players=queue.getByRole('button',{name:'Players for replay.ttrm',exact:true});
+  const leftPlayer=queue.locator('.player-order-name');
+  const swap=queue.getByRole('button',{name:'Swap players for replay.ttrm'});
+  assert(await leftPlayer.isHidden());
+  await players.click();
+  await leftPlayer.getByText(first.username,{exact:true}).waitFor();
+  await swap.click();
+  await leftPlayer.getByText(second.username,{exact:true}).waitFor();
+  await queue.keyboard.press('Escape');
+  await leftPlayer.waitFor({state:'hidden'});
   await page.getByRole('region',{name:'Render logs',exact:true}).waitFor();
   assert.equal(await page.getByRole('spinbutton',{name:'Preview length'}).count(),0);
   await app.evaluate(({dialog},directory)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[directory]});},temp);
@@ -62,6 +73,9 @@ try{
   await Promise.race([page.getByText('All exports complete',{exact:true}).waitFor({timeout:180000}),page.getByRole('alert').waitFor().then(async()=>{throw Error(await page.getByRole('alert').innerText())})]);
   assert.match(await page.locator('.logs pre').innerText(),/Saved /,'Export messages appear in the log column');
   await queue.getByRole('button',{name:'Show video for replay.ttrm'}).waitFor();
+  await players.click();
+  await leftPlayer.getByText(second.username,{exact:true}).waitFor();
+  assert(await swap.isDisabled());
   const events=await page.evaluate(()=>window.testEvents);
   assert(events.some(event=>event.type==='backend'),'Structured backend selection arrives');
   assert(events.some(event=>event.type==='progress'),'Structured rendering progress arrives');
@@ -78,6 +92,7 @@ try{
   assert(!Object.hasOwn(prefs,'duration'));assert.equal(prefs.backend,process.argv[3]||'auto');
   await page.screenshot({path:'/tmp/replay-render-desktop.png',fullPage:true});
   await queue.screenshot({path:'/tmp/ttrm2mp4-queue.png'});
+  await queue.keyboard.press('Escape');
   // Remove/re-add, then cancel during startup. Cancel must not trigger fallback.
   await queue.getByRole('button',{name:'Remove replay.ttrm'}).click();
   await page.getByRole('button',{name:'Queue 0',exact:true}).waitFor();

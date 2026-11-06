@@ -137,6 +137,14 @@ async function main() {
   const replay = JSON.parse(await readFile(input, 'utf8'));
   const rounds = replay.replay?.rounds;
   if (!Array.isArray(rounds) || !rounds.length || rounds.some(r => !Array.isArray(r) || r.length !== 2 || r.some(p => !Number.isFinite(p.replay?.frames) || p.replay.frames <= 0 || !Array.isArray(p.replay.events)))) throw Error('Expected complete two-player multiplayer replay data.');
+  const leftPlayer=process.env.REPLAY_LEFT_PLAYER;
+  if(leftPlayer){
+    const leaderboard=replay.replay.leaderboard;
+    if(!Array.isArray(leaderboard)||leaderboard.length!==2||!leaderboard.some(player=>player?.id===leftPlayer)
+      ||rounds.some(round=>!round.some(player=>player.id===leftPlayer)))throw Error('The selected left player is missing from the replay');
+    // TETR.IO uses the first leaderboard player as the left board in every round.
+    if(leaderboard[0].id!==leftPlayer)leaderboard.reverse();
+  }
   const selectedRounds=options['worker-rounds']===undefined?null:options['worker-rounds']==='none'?[]:options['worker-rounds'].split(',').map(value=>number(value,'worker round',rounds.length));
   const videoOnlyWorker=windowsEncoder&&process.env.REPLAY_WORKER_VIDEO_ONLY==='1';
   if(videoOnlyWorker&&(!selectedRounds?.length||!options['worker-video-dir']||options['worker-audio']))throw Error('Video-only workers require selected rounds, shared video storage, and a separate audio leader');

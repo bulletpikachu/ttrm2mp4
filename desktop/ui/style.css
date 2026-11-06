@@ -28,7 +28,7 @@ main {
   background: #fff url("../assets/majime.png") center / contain no-repeat;
 }
 .titlebar, .toolbar, .window-controls,
-.replay-actions, .export-actions, .status-line, .file-row {
+.replay-actions, .export-actions, .status-line {
   display: flex;
   align-items: center;
 }
@@ -117,11 +117,28 @@ h1 span { color: #b4232b; }
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
-.file-row { gap: 4px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.file-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .file-info small { font-size: 10px; color: var(--muted); }
 .file-info { flex: 1; min-width: 0; }
+.file-heading { display: flex; align-items: baseline; gap: 4px; }
 .file-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .file-info small { display: block; }
+.file-heading .player-order-toggle { flex-shrink: 0; padding: 0 2px; font-size: 10px; }
+.player-order {
+  inset: auto;
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-block;
+  max-width: min(210px, calc(100vw - 16px));
+  margin: 3px 0;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: #fff;
+  box-shadow: 0 2px 6px #0002;
+}
+.player-order:popover-open { display: flex; align-items: center; gap: 6px; }
+.player-order-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.player-order .secondary { min-height: 22px; padding: 2px 4px; font-size: 10px; }
 .queue-error { margin: 2px 0 0; overflow: auto; font-size: 10px; color: var(--accent); }
 .text, .remove { border: 0; background: transparent; color: var(--accent); }
 .text { padding: 5px 2px; white-space: nowrap; font-size: 12px; }

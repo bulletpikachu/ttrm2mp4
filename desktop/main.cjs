@@ -83,7 +83,10 @@ if(process.env.REPLAY_ENGINE_ENTRY){
     windowControl('window:close',view=>view.close());
 
     let queueState={files:[],busy:false};
-    const sendQueue=()=>queueWindow?.webContents.send('queue:state',queueState);
+    const sendQueue=()=>queueWindow?.webContents.send('queue:state',{
+      ...queueState,
+      files:queueState.files.map(file=>({...file,leftPlayer:files.get(file.id)?.leftPlayer})),
+    });
     handle('queue:open',async()=>{
       if(queueWindow){
         if(queueWindow.isMinimized())queueWindow.restore();
@@ -111,6 +114,15 @@ if(process.env.REPLAY_ENGINE_ENTRY){
       if(queueState.busy||jobs.active||setup.active)return;
       if(id!==null&&!queueState.files.some(file=>file.id===id))throw Error('Unknown replay');
       window.webContents.send('queue:edit',id);
+    },true);
+    handle('queue:left-player',(id,playerId)=>{
+      if(queueState.busy||jobs.active||setup.active)return;
+      const row=queueState.files.find(file=>file.id===id);
+      const replay=files.get(id);
+      if(!row||!replay?.players?.some(player=>player.id===playerId))throw Error('Unknown replay or player');
+      if(row.status==='Complete')return;
+      replay.leftPlayer=playerId;
+      sendQueue();
     },true);
     handle('render:initial',async()=>{const settings={outputDirectory:app.getPath('videos'),clientDirectory:initialClient,backend:'auto',width:1920,height:1080,fps:60,...preferences()};return {settings,platform:process.platform,clientReady:await clientReady(settings.clientDirectory),appearance:summarizeAppearance(await storedAppearance(appearancePath))};});
     handle('render:add',async paths=>{
