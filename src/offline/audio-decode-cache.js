@@ -16,7 +16,7 @@
         const inputSha256=digest(Buffer.from(input));
         const key=`${inputSha256}-${context.sampleRate}-${process.versions.electron}-v1`;
         const metaFile=path.join(directory,key+'.json'),pcmFile=path.join(directory,key+'.f32');
-        if(fs.existsSync(metaFile)){
+        try{if(fs.existsSync(metaFile)){
           const meta=JSON.parse(fs.readFileSync(metaFile,'utf8')),pcm=fs.readFileSync(pcmFile);
           if(meta.inputSha256!==inputSha256||meta.sampleRate!==context.sampleRate||!Number.isSafeInteger(meta.length)||meta.length<1||!Number.isSafeInteger(meta.channels)||meta.channels<1||meta.channels>32||pcm.length!==meta.length*meta.channels*4||digest(pcm)!==meta.pcmSha256)throw Error('Invalid decoded audio cache: '+key);
           const buffer=context.createBuffer(meta.channels,meta.length,meta.sampleRate);
@@ -24,7 +24,7 @@
           for(let channel=0;channel<meta.channels;channel++)buffer.copyToChannel(data.subarray(channel*meta.length,(channel+1)*meta.length),channel);
           structuredClone(input,{transfer:[input]});
           metrics.hits++;metrics.bytes+=pcm.length;return buffer;
-        }
+        }}catch(error){ /* An incomplete or locked cache entry is a cache miss. */ }
         metrics.misses++;
         const buffer=await decode(input),channels=buffer.numberOfChannels,length=buffer.length;
         const pcm=Buffer.allocUnsafe(channels*length*4);
@@ -34,8 +34,13 @@
         }
         const meta={inputSha256,pcmSha256:digest(pcm),sampleRate:buffer.sampleRate,length,channels};
         const suffix=`.${process.pid}.${randomUUID()}.tmp`;
-        fs.writeFileSync(pcmFile+suffix,pcm);fs.renameSync(pcmFile+suffix,pcmFile);
-        fs.writeFileSync(metaFile+suffix,JSON.stringify(meta));fs.renameSync(metaFile+suffix,metaFile);
+        // Multiple rendering workers can decode the same sound at once. Cache
+        // publication is optional: a locked destination must not fail a render.
+        try{
+          fs.writeFileSync(pcmFile+suffix,pcm);fs.renameSync(pcmFile+suffix,pcmFile);
+          fs.writeFileSync(metaFile+suffix,JSON.stringify(meta));fs.renameSync(metaFile+suffix,metaFile);
+        }catch(error){ /* Continue with the freshly decoded audio. */ }
+        finally{for(const file of [pcmFile+suffix,metaFile+suffix])try{fs.unlinkSync(file)}catch(error){}}
         return buffer;
       })();
       promise.then(()=>{metrics.milliseconds+=performance.now()-start},error=>{window.__audioDecodeCacheFailure=error.stack||String(error)});
