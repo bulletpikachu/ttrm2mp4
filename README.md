@@ -1,6 +1,6 @@
 # ttrm2mp4
 
-Convert a two-player `.ttrm` match into an MP4 using TETR.IO’s original game engine, Pixi renderer and shaders. Export runs on a controlled clock with browser networking disabled. Each completed round is saved while later rounds continue rendering.
+Convert a single-player `.ttr` replay or a two-player `.ttrm` match into an MP4 using TETR.IO’s original game engine, Pixi renderer and shaders. Export runs on a controlled clock with browser networking disabled. Each completed round is saved while later rounds continue rendering.
 
 ## Desktop app
 
@@ -9,7 +9,7 @@ npm ci
 npm run desktop
 ```
 
-Drop one or more `.ttrm` files onto the artwork, or use **Choose replay files**. Use the settings on the right to pick an output folder, resolution, frame rate, or backend. The left column shows the current run’s logs. Press **Render** to start. Exports run one at a time, and **Queue** opens the sketchbook window with queued replays and links to completed videos. If an output filename is already in use, the app picks the next available name. Drag the top of the artwork to move the window, or resize from the edges to keep its original proportions.
+Drop `.ttr` or `.ttrm` files onto the artwork, or use **Choose replay files**. Use the settings on the right to pick an output folder, resolution, frame rate, or backend. The left column shows the current run’s logs. Press **Render** to start. Exports run one at a time, and **Queue** opens the sketchbook window with queued replays and links to completed videos. If an output filename is already in use, the app picks the next available name. Drag the top of the artwork to move the window, or resize from the edges to keep its original proportions.
 
 On first use, add a replay and click **Set up & render**. The app downloads TETR.IO files with its bundled browser, verifies the downloaded objects, checks an offline preview, then renders the replay. You can also use **Set up TETR.IO files** in the settings column to download without rendering. Setup needs an internet connection and may take a minute or two. No installed TETR.IO game, Chrome, or command-line setup is required.
 
@@ -48,6 +48,7 @@ Use the same command on every machine:
 
 ```sh
 npm run render -- example.ttrm output.mp4
+npm run render -- sprint.ttr sprint.mp4
 ```
 
 The launcher tries the prepared Apple Silicon backend on macOS arm64 or the prepared NVIDIA backend on Windows x64. Before selecting native rendering, it runs a temporary 0.1-second export at the requested dimensions and frame rate; Windows checks the proposed number of concurrent NVENC sessions and Media Foundation AAC, reducing automatic worker counts if concurrent startup fails. Missing modules or a failed startup check select the portable Chrome backend instead. This check adds startup time and never writes to your destination. Later export failures stop the command without restarting or overwriting completed rounds.
@@ -122,6 +123,8 @@ The command writes:
 - `output-rounds/round-01.mp4`, etc.: rounds published as they finish.
 
 Add `--report` to a command-line export to write a diagnostic JSON file with elapsed time, settings, frame ranges, publication times and audio verification.
+
+Single-player replays count as one round when round files are enabled.
 
 ```sh
 # Short preview, one round, or replacement of an existing export

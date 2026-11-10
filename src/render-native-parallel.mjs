@@ -23,6 +23,7 @@ import {makeFrameWindows,verifyFrameWorker,createFragmentCollector} from './offl
 import {hostResources,resourceDefaults} from './offline/render-policy.mjs';
 
 import {defaultClientDirectory,emitRenderEvent,forwardRenderEvents} from './offline/runtime.mjs';
+import {readReplay,roundFrameCount} from './offline/replay.mjs';
 const worker=fileURLToPath(new URL('./render.mjs',import.meta.url));
 async function publishFile(source,target){
   try{await rename(source,target)}catch(error){if(error.code!=='EXDEV')throw error;const staged=path.join(path.dirname(target),`.${path.basename(target)}.${randomUUID()}.partial`);try{await copyFile(source,staged,fsConstants.COPYFILE_EXCL);await rename(staged,target)}finally{await rm(staged,{force:true})}}
@@ -46,8 +47,8 @@ async function main(){
   if(windows)process.env.REPLAY_RESERVE_MOOV??='1';
   const profileDirectory=windows&&process.env.REPLAY_WORKER_PROFILES?path.resolve(process.env.REPLAY_WORKER_PROFILES):null;
   if(o['central-encoder'])o['stream-audio']=true;
-  if(o.help)return console.log('Usage: npm run render-native-parallel -- input.ttrm output.mp4 [--backend mac|windows] [--jobs N --threads N] [--report] [--overwrite]\nExperimental native rendering, full continuous audio, and progressive round files.\nWindows uses D3D11/NVENC with continuous audio; threads applies to Mac x264 only.\n--stream-audio: stream round PCM and reuse a renderer for the full audio reference.\nWindows REPLAY_WINDOWS_MF_AUDIO=1: use a dedicated audio leader and Media Foundation AAC.\n--central-encoder: Mac only, share one native codec scheduling queue.');
-  if(p.length!==2)throw Error('Provide input.ttrm and output.mp4');
+  if(o.help)return console.log('Usage: npm run render-native-parallel -- input.ttr|input.ttrm output.mp4 [--backend mac|windows] [--jobs N --threads N] [--report] [--overwrite]\nExperimental native rendering, full continuous audio, and progressive round files.\nWindows uses D3D11/NVENC with continuous audio; threads applies to Mac x264 only.\n--stream-audio: stream round PCM and reuse a renderer for the full audio reference.\nWindows REPLAY_WINDOWS_MF_AUDIO=1: use a dedicated audio leader and Media Foundation AAC.\n--central-encoder: Mac only, share one native codec scheduling queue.');
+  if(p.length!==2)throw Error('Provide a .ttr or .ttrm replay and output.mp4');
   if(profileDirectory)await mkdir(profileDirectory,{recursive:true});
   const width=Number(o.width),height=Number(o.height),fps=Number(o.fps);
   const resources=hostResources(),defaults=resourceDefaults(resources,width,height);
@@ -58,19 +59,18 @@ async function main(){
   const input=path.resolve(p[0]),output=path.resolve(p[1]),directory=output.replace(/\.mp4$/i,'-rounds');
   const reportFile=o.report?output.replace(/\.mp4$/i,'.json'):null;
   const appearance=o.appearance&&path.resolve(o.appearance);
-  if(!/\.ttrm$/i.test(input)||!/\.mp4$/i.test(output))throw Error('Expected .ttrm input and .mp4 output');
-  const replay=JSON.parse(await readFile(input,'utf8')),rounds=replay.replay?.rounds;
-  if(!Array.isArray(rounds)||!rounds.length||rounds.some(round=>!Array.isArray(round)||round.length!==2||round.some(player=>!Number.isFinite(player.replay?.frames)||player.replay.frames<=0||!Array.isArray(player.replay.events))))throw Error('Expected complete two-player multiplayer replay data');
+  if(!/\.mp4$/i.test(output))throw Error('Output must be an MP4');
+  const {rounds}=await readReplay(input);
   if(!o.overwrite)for(const target of reportFile?[output,directory,reportFile]:[output,directory]){try{await access(target);throw Error('Output exists: '+target)}catch(error){if(error.code!=='ENOENT')throw error}}
   await mkdir(path.dirname(output),{recursive:true});await mkdir(directory,{recursive:true});
   const temp=await mkdtemp(path.join(windows?tmpdir():path.dirname(output),windows?'replay-win-parallel-':'.replay-render-parallel-'));
   const rawDirectory=path.join(temp,'raw');await mkdir(rawDirectory);
   let assignments=Array.from({length:Math.min(jobs,rounds.length)},()=>({rounds:[],frames:0}));
-  for(const item of rounds.map((round,i)=>({round:i+1,frames:Math.max(...round.map(p=>p.replay.frames))})).sort((a,b)=>b.frames-a.frames)){
+  for(const item of rounds.map((round,i)=>({round:i+1,frames:roundFrameCount(round)})).sort((a,b)=>b.frames-a.frames)){
     const target=assignments.reduce((a,b)=>a.frames<=b.frames?a:b);target.rounds.push(item.round);target.frames+=item.frames;
   }
   if(frameRanges){
-    const estimate=Math.ceil(rounds.reduce((sum,round)=>sum+Math.max(...round.map(player=>player.replay.frames))*fps/60+fps*2,0));
+    const estimate=Math.ceil(rounds.reduce((sum,round)=>sum+roundFrameCount(round)*fps/60+fps*2,0));
     assignments=makeFrameWindows(estimate,jobs,fps,{simulationWeight:frameSimulationWeight}).map(frameWindow=>({rounds:rounds.map((_,i)=>i+1),frameWindow}));
   }
   const leaderIndex=dedicatedAudio?null:prefixWorkers?assignments.findIndex(assignment=>assignment.rounds.includes(rounds.length)):0;
@@ -183,7 +183,7 @@ async function main(){
       while(pendingAudio.has(audioRound)){
         const next=pendingAudio.get(audioRound);pendingAudio.delete(audioRound++);
         if(windows){
-          const maxFrames=rounds.reduce((sum,round)=>sum+Math.max(...round.map(player=>player.replay.frames)),0)+fps*(rounds.length*10+30);
+          const maxFrames=rounds.reduce((sum,round)=>sum+roundFrameCount(round),0)+fps*(rounds.length*10+30);
           continuousMux??=createContinuousMux(ffmpeg,path.join(temp,'master.mp4'),fps,next.sampleRate,maxFrames);
           continuousMux.append(path.join(rawDirectory,`round-${next.round}.h264`),path.join(rawDirectory,`round-${next.round}.f32`),next);
         }else{

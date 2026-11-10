@@ -36,7 +36,7 @@ function App(){
     if(event.type==='started'){setProgress(0);setStage('Preparing export');setFiles(value=>value.map(file=>file.id===event.fileId?{...file,status:'Rendering',output:event.output}:file));}
     if(event.type==='progress'){
       if(event.stage)setStage(event.stage);
-      else{setStage(`Rendering round ${event.round||1} of ${event.roundCount||1}`);setProgress(value=>Math.max(value,Math.min(.98,(event.seconds||0)/(event.totalSeconds||1))));}
+      else{setStage(event.singleplayer?'Rendering replay':`Rendering round ${event.round||1} of ${event.roundCount||1}`);setProgress(value=>Math.max(value,Math.min(.98,(event.seconds||0)/(event.totalSeconds||1))));}
     }
     if(event.type==='finished'){setProgress(1);setFiles(value=>value.map(file=>file.id===event.fileId?{...file,status:'Complete',output:event.output}:file));setStage('Export complete');}
     if(event.type==='error'){setError(event.message||'Export failed');setStage('Export stopped');setFiles(value=>value.map(file=>file.status==='Rendering'?{...file,status:'Failed'}:file));}
@@ -126,7 +126,7 @@ function App(){
       <div className="replay-actions">
         <button className="secondary" disabled={busy} onClick={()=>input.current?.click()}>Choose replay files</button>
         <button className="secondary" onClick={()=>void window.replayRender.openQueue().catch(error=>setError(error.message))}>Queue <span className="count">{files.length}</span></button>
-        <input ref={input} type="file" multiple accept=".ttrm" aria-label="Replay files" hidden onChange={event=>{void add(Array.from(event.target.files||[]));event.target.value='';}}/>
+        <input ref={input} type="file" multiple accept=".ttr,.ttrm" aria-label="Replay files" hidden onChange={event=>{void add(Array.from(event.target.files||[]));event.target.value='';}}/>
       </div>
       <div className="activity" aria-live="polite">
         <div className="status-line"><strong>{stage==='Ready when you are'?(ready?'':'Set up TETR.IO files once'):stage}</strong><span>{backend}</span></div>

@@ -11,7 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {readAppearance} from './offline/appearance.mjs';
-import { attachLocalClient } from './offline/client.mjs';
+import { attachLocalClient, importReplay } from './offline/client.mjs';
+import {readReplay,replayExtension,roundFrameCount} from './offline/replay.mjs';
 import {createContinuousAudio} from './offline/continuous-audio.mjs';
 import {createContinuousMux} from './offline/continuous-mux.mjs';
 import {createFFmpegVideo} from './offline/ffmpeg-video.mjs';
@@ -29,7 +30,7 @@ async function publishFile(source,target){
   }
 }
 async function shareFile(source,target){try{await link(source,target)}catch(error){if(error.code!=='EXDEV')throw error;await copyFile(source,target,fsConstants.COPYFILE_EXCL)}}
-const help = `Usage: npm run render-portable -- input.ttrm [output.mp4] [options]
+const help = `Usage: npm run render-portable -- input.ttr|input.ttrm [output.mp4] [options]
 
 Offline, frame-by-frame export using the pinned native TETR.IO WebGL engine.
 First run: npm run prepare-client -- example.ttrm (downloads client/assets once).
@@ -135,12 +136,10 @@ async function main() {
   const qualityInterval=number(options['quality-interval'],'quality interval',Infinity,false);
   if (width % 2 || height % 2) throw Error('Video dimensions must be even.');
   const input = path.resolve(positionals[0]);
-  if (!/\.ttrm$/i.test(input)) throw Error('Input must be a .ttrm replay.');
-  const replay = JSON.parse(await readFile(input, 'utf8'));
-  const rounds = replay.replay?.rounds;
-  if (!Array.isArray(rounds) || !rounds.length || rounds.some(r => !Array.isArray(r) || r.length !== 2 || r.some(p => !Number.isFinite(p.replay?.frames) || p.replay.frames <= 0 || !Array.isArray(p.replay.events)))) throw Error('Expected complete two-player multiplayer replay data.');
+  const replayInput = await readReplay(input);
+  const {replay,rounds,singleplayer} = replayInput;
   const leftPlayer=process.env.REPLAY_LEFT_PLAYER;
-  if(leftPlayer){
+  if(leftPlayer&&!singleplayer){
     const leaderboard=replay.replay.leaderboard;
     if(!Array.isArray(leaderboard)||leaderboard.length!==2||!leaderboard.some(player=>player?.id===leftPlayer)
       ||rounds.some(round=>!round.some(player=>player.id===leftPlayer)))throw Error('The selected left player is missing from the replay');
@@ -156,9 +155,10 @@ async function main() {
   if(selectedRounds&&new Set(selectedRounds).size!==selectedRounds.length)throw Error('Worker rounds must be unique');
   const round = options.round ? number(options.round, 'round', rounds.length) : null;
   const limitSeconds = options.duration ? number(options.duration, 'duration', Infinity, false) : null;
-  const expected = (round ? [rounds[round - 1]] : rounds).reduce((sum, r) => sum + Math.max(...r.map(p => p.replay.frames)) / 60, 0);
+  const roundFrameLimits = rounds.map(roundFrameCount);
+  const expected = (round ? roundFrameLimits[round - 1] : roundFrameLimits.reduce((sum, frames) => sum + frames, 0)) / 60;
   const maxSeconds = Math.ceil(expected + (round ? 1 : rounds.length) * 10 + 30);
-  const output = path.resolve(positionals[1] || input.replace(/\.ttrm$/i, '-offline.mp4'));
+  const output = path.resolve(positionals[1] || input.replace(replayExtension, '-offline.mp4'));
   if (!/\.mp4$/i.test(output)) throw Error('Output must be an MP4.');
   const reportFile = options.report ? output.replace(/\.mp4$/i, '.json') : null;
   if(options.profile&&[output,reportFile].includes(path.resolve(options.profile)))throw Error('Profile must have a different path from the export files');
@@ -257,14 +257,7 @@ async function main() {
       const cache=window.__nativeWebGLContext(__native.app.view)?._n._replayShaderCacheStats?.();
       if(!cache?.enabled)throw Error('Shader caching requires rebuilding the local Windows WebGL binding');
     });
-    // A local file does not need the online replay-ID existence check.
-    replay.id = null;
-    await page.evaluate(raw => {
-      const dt = new DataTransfer();dt.items.add(new File([raw], 'input.ttrm', { type: 'application/json' }));
-      document.getElementById('menus').dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
-    }, JSON.stringify(replay));
-    await page.locator('#multilog .multilog_result').first().waitFor({ state: 'visible' });
-    if (await page.locator('#multilog .multilog_result').count() !== rounds.length) throw Error('Native client did not import every round.');
+    const startSelector = await Promise.race([importReplay(page,replayInput),startupFailure]);
     mark('replayImported');
     await page.evaluate(async()=>{
       // Decode music before advancing virtual time. File prefetch alone leaves
@@ -281,7 +274,7 @@ async function main() {
       });
       mark('texturesDecoded');
     }
-    await page.evaluate(async({ round,deterministic }) => {
+    await page.evaluate(async({ round,deterministic,singleplayer,startSelector }) => {
       window.__native.audio.BgmKill();
       window.__offlineSfx.length = 0;
       window.__timeline.freeze({deterministic});
@@ -298,9 +291,9 @@ async function main() {
         }
         __timeline.restartOrigin();__offlineSfx.length=0;
       }
-      document.querySelectorAll('#multilog .multilog_result')[(round || 1) - 1].click();
-      document.getElementById(round ? 'replaytools_button_end' : 'replaytools_button_nextround').click();
-    }, { round,deterministic });
+      document.querySelectorAll(startSelector)[(round || 1) - 1].click();
+      if (!singleplayer) document.getElementById(round ? 'replaytools_button_end' : 'replaytools_button_nextround').click();
+    }, { round,deterministic,singleplayer,startSelector });
     await page.evaluate(async () => {
       await document.fonts.ready;
     });
@@ -353,9 +346,10 @@ async function main() {
     }
     let previousRound;
     await page.exposeBinding('__renderProgress', (_, data) => {
-      emitRenderEvent('progress',{...data,totalSeconds:limitSeconds?Math.min(expected,limitSeconds):expected,roundCount:rounds.length});
+      emitRenderEvent('progress',{...data,totalSeconds:limitSeconds?Math.min(expected,limitSeconds):expected,roundCount:rounds.length,singleplayer});
       if (data.stage) { console.log(`${((performance.now() - exportStart) / 1000).toFixed(2)}s: ${data.stage}`); return; }
-      if (data.round !== previousRound) { console.log(`Rendering round ${data.round || round || 1} / ${rounds.length}…`); previousRound = data.round; }
+      const currentRound = data.round || round || 1;
+      if (currentRound !== previousRound) { console.log(singleplayer?'Rendering single-player replay…':`Rendering round ${currentRound} / ${rounds.length}…`); previousRound = currentRound; }
     });
     if(options['surface-encoder'])await page.addScriptTag({path:path.join(here,options['surface-stream']?'experimental/surface-stream-renderer.js':'experimental/surface-renderer.js')});
     if(options['raw-encoder']){
@@ -391,7 +385,7 @@ async function main() {
     const exportStart = performance.now();
     mark('exportStarted');
     if(options['native-webgl'])await page.evaluate(()=>{window.__exportCPUStart=process.cpuUsage()});
-    const result = await page.evaluate(options => __exportMovie(options), { fps, width, height, limitSeconds, maxSeconds, roundCount: rounds.length, queue, encoderMode: options.encoder, latencyMode: options.latency, encoderRate, selectedRounds, deterministic,qualityInterval,videoOnlyWorker,frameWindow,stopAfterSelected:windowsEncoder&&process.env.REPLAY_WORKER_PREFIX==='1',roundFrameLimits:rounds.map(round=>Math.max(...round.map(player=>player.replay.frames))) });
+    const result = await page.evaluate(options => __exportMovie(options), { fps, width, height, limitSeconds, maxSeconds, roundCount: rounds.length, singleplayer, queue, encoderMode: options.encoder, latencyMode: options.latency, encoderRate, selectedRounds, deterministic,qualityInterval,videoOnlyWorker,frameWindow,stopAfterSelected:windowsEncoder&&process.env.REPLAY_WORKER_PREFIX==='1',roundFrameLimits });
     result.graphicsPreset=await page.evaluate(()=>window.__native.settings.video.graphics);
     if (appearance) {
       result.appearance={

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import {spawn} from 'node:child_process';
-import {access,mkdtemp,readFile,rm} from 'node:fs/promises';
+import {access,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {hostResources,resourceDefaults,positiveInteger,extractOptions,optionValue,selectBackend,probeWorkerCount,windowsFastEnvironment} from './offline/render-policy.mjs';
 import {terminateWindowsProcessTree} from './offline/windows-process-tree.mjs';
+import {readReplay,replayExtension} from './offline/replay.mjs';
 
 import {resourceRoot,defaultClientDirectory,emitRenderEvent,forwardRenderEvents,portableEnvironment} from './offline/runtime.mjs';
 const root=resourceRoot;
@@ -34,7 +35,7 @@ async function run(script,args,{env=process.env,probe=false,executable}={}) {
 }
 async function main(){
   const raw=process.argv.slice(2);
-  if(raw.includes('--help'))return console.log(`Usage: npm run render -- input.ttrm [output.mp4] [options]
+  if(raw.includes('--help'))return console.log(`Usage: npm run render -- input.ttr|input.ttrm [output.mp4] [options]
 
 Automatically select a prepared native backend, or the portable Chrome renderer.
   --backend MODE  auto (default), portable, mac, windows-nvidia
@@ -65,10 +66,9 @@ Use npm run render-portable -- --help for all portable renderer options.`);
     if(arg.startsWith('--')){if(!arg.includes('=')&&valueOptions.has(arg.slice(2)))i++;continue;}
     positionals.push(arg);
   }
-  if(positionals.length<1||positionals.length>2||!/\.ttrm$/i.test(positionals[0]))throw Error('Provide input.ttrm and an optional output.mp4. Use --help for usage.');
+  if(positionals.length<1||positionals.length>2)throw Error('Provide a .ttr or .ttrm replay and an optional output.mp4. Use --help for usage.');
   // Validate the input before probing, so input errors never look like GPU failures.
-  const replay=JSON.parse(await readFile(path.resolve(positionals[0]),'utf8'));
-  if(!Array.isArray(replay.replay?.rounds)||!replay.replay.rounds.length)throw Error('Expected a complete two-player multiplayer replay');
+  await readReplay(positionals[0]);
   let nativeThreads=threads??defaults.nativeThreads;
   const selection=await selectBackend({requested,platform:process.platform,arch:process.arch,args,threadsRequested:threads!==undefined,probe:async backend=>{
     if(backend==='mac'&&threads===undefined&&process.env.REPLAY_X264_THREADS!==undefined)nativeThreads=positiveInteger(process.env.REPLAY_X264_THREADS,'REPLAY_X264_THREADS',32);
@@ -105,7 +105,7 @@ Use npm run render-portable -- --help for all portable renderer options.`);
   console.log(`Renderer: ${selection.backend}. ${selection.reason}`);
   if(selection.backend==='windows-nvidia'){
     if(threads!==undefined)throw Error('--threads applies to CPU encoding; Windows NVENC uses --jobs instead');
-    const output=positionals[1]??path.resolve(positionals[0]).replace(/\.ttrm$/i,'-offline.mp4');
+    const output=positionals[1]??path.resolve(positionals[0]).replace(replayExtension,'-offline.mp4');
     console.log(`Using ${jobs} drawing worker(s), plus one audio worker.`);
     await run('src/render-windows-fast.mjs',[...args.filter(arg=>!['--export-rounds','--deterministic'].includes(arg)),...(positionals[1]?[]:[output]),'--jobs',String(jobs)]);
   }else if(selection.backend==='mac'){

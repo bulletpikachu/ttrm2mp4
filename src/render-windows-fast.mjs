@@ -7,7 +7,7 @@ import { windowsFastEnvironment } from './offline/render-policy.mjs';
 import { terminateWindowsProcessTree } from './offline/windows-process-tree.mjs';
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
-  console.log('Usage: npm run render-windows-fast -- input.ttrm output.mp4 [--jobs N] [--overwrite] [--report]\n\nWindows x64 NVIDIA D3D11/NVENC export with CPU/memory-adaptive drawing workers,\ncontinuous Media Foundation AAC audio and progressive round files.\nRun npm run prepare-windows-fast -- input.ttrm first.\nFor short previews or non-NVIDIA machines, use npm run render.');
+  console.log('Usage: npm run render-windows-fast -- input.ttr|input.ttrm output.mp4 [--jobs N] [--overwrite] [--report]\n\nWindows x64 NVIDIA D3D11/NVENC export with CPU/memory-adaptive drawing workers,\ncontinuous Media Foundation AAC audio and progressive round files.\nRun npm run prepare-windows-fast -- input.ttrm first.\nFor short previews or non-NVIDIA machines, use npm run render.');
 } else {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw Error('Requires Windows x64 with NVIDIA NVENC; use render-fast on Apple Silicon or render for the portable browser path');
   for (const name of ['src/experimental/native/audio-mixer.node', '.native-deps/node-webgl-windows/node-webgl-windows.node', '.native-deps/node-webgl-windows/dist/index.js', '.native-deps/windows-gpu/windows-encoder.node']) {

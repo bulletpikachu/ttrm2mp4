@@ -3,7 +3,7 @@ import path from 'node:path';
 import {parseArgs} from 'node:util';
 import {prepareClient} from './offline/prepare-client.mjs';
 const {values:options,positionals}=parseArgs({allowPositionals:true,options:{chrome:{type:'string'},client:{type:'string',default:'client'},engine:{type:'string',default:'chrome'},software:{type:'boolean'},help:{type:'boolean'}}});
-const usage='Usage: npm run prepare-client -- replay.ttrm [--client PATH] [--engine chrome|electron] [--chrome PATH] [--software]';
+const usage='Usage: npm run prepare-client -- replay.ttr|replay.ttrm [--client PATH] [--engine chrome|electron] [--chrome PATH] [--software]';
 if(options.help)console.log(usage);
 else{
   if(positionals.length!==1||!['chrome','electron'].includes(options.engine))throw Error(usage);

@@ -12,7 +12,7 @@ export function patchClient(source,{audioOnlyParticles=false,appearance=null}={}
   replace('xt("entry_button").addEventListener("click",(function(e){let t=', 'xt("entry_button").addEventListener("click",(window.__offlineEntryBound=true,function(e){if(window.__offlineMode){yn.login("offline","000000000000000000000000","offline-replay",!1);yn.setRole("anon");document.body.classList.add("anon");xt("entry_form").classList.add("hidden");En.finish();return}let t=');
   replace('const s={get id(){return n.id},get state()', 'const s={get _ctx(){return n},get id(){return n.id},get state()');
   replace('Zl=new o.Application({','window.__nativePixi=o,Zl=new o.Application({');
-  replace('window.DEVHOOK_LOAD_REPLAY_RAW=e=>', `window.__native={get games(){return ha},get app(){return Zl},get foreground(){return ec},get pixi(){return window.__nativePixi},get settings(){return ot},get audio(){return La}};window.DEVHOOK_LOAD_REPLAY_RAW=e=>`);
+  replace('window.DEVHOOK_LOAD_REPLAY_RAW=e=>', `window.__native={get games(){return ha},get soloReplay(){return ki},get app(){return Zl},get foreground(){return ec},get pixi(){return window.__nativePixi},get settings(){return ot},get audio(){return La}};window.DEVHOOK_LOAD_REPLAY_RAW=e=>`);
   // The countdown can reveal a replay board after the tick that updates animations.
   // Give it the opening slide position before the exporter can draw it.
   replace(
@@ -44,6 +44,21 @@ export function patchClient(source,{audioOnlyParticles=false,appearance=null}={}
     replace(start,'Mc=(()=>{'+connected+start.slice('Mc=(()=>{'.length));
   }
   return audioOnlyParticles?patchAudioOnlyParticles(source):source;
+}
+
+export async function importReplay(page, {replay, singleplayer, rounds}) {
+  // Local files do not need the online replay ID check.
+  const raw = JSON.stringify({...replay, id: null, shortid: null});
+  await page.evaluate(({raw, filename}) => {
+    const data = new DataTransfer();
+    data.items.add(new File([raw], filename, {type: 'application/json'}));
+    document.getElementById('menus').dispatchEvent(new DragEvent('drop', {bubbles: true, dataTransfer: data}));
+  }, {raw, filename: singleplayer ? 'input.ttr' : 'input.ttrm'});
+  const startSelector = singleplayer ? '#watchreplay_results' : '#multilog .multilog_result';
+  const controls = page.locator(startSelector);
+  await controls.first().waitFor({state: 'visible'});
+  if (!singleplayer && await controls.count() !== rounds.length) throw Error('Native client did not import every round.');
+  return startSelector;
 }
 
 export async function createLocalClientStore(directory, options={}) {

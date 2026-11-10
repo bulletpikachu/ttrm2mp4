@@ -4,18 +4,18 @@ import {randomUUID} from 'node:crypto';
 import {access,readFile,stat,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {terminateWindowsProcessTree} from '../src/offline/windows-process-tree.mjs';
+import {readReplay,replayExtension,roundFrameCount} from '../src/offline/replay.mjs';
 
 export async function inspectReplay(file){
-  if(typeof file!=='string'||!path.isAbsolute(file)||!/\.ttrm$/i.test(file))throw Error('Choose a .ttrm replay file');
+  if(typeof file!=='string'||!path.isAbsolute(file)||!replayExtension.test(file))throw Error('Choose a .ttr or .ttrm replay file');
   const info=await stat(file);if(!info.isFile()||info.size>100*1024*1024)throw Error('Replay must be a file smaller than 100 MB');
-  const replay=JSON.parse(await readFile(file,'utf8')),rounds=replay.replay?.rounds;
-  if(!Array.isArray(rounds)||!rounds.length||rounds.some(round=>!Array.isArray(round)||round.length!==2||round.some(player=>!Number.isFinite(player.replay?.frames)||player.replay.frames<=0||!Array.isArray(player.replay.events))))throw Error('Expected a complete two-player match replay');
-  const leaderboard=replay.replay.leaderboard;
+  const {replay,rounds,singleplayer}=await readReplay(file);
+  const leaderboard=singleplayer?null:replay.replay.leaderboard;
   const players=Array.isArray(leaderboard)&&leaderboard.length===2
     &&leaderboard.every(player=>typeof player?.id==='string'&&player.id&&typeof player.username==='string')
     &&leaderboard[0].id!==leaderboard[1].id
     ?leaderboard.map(({id,username})=>({id,username})):undefined;
-  return {id:randomUUID(),path:file,name:path.basename(file),players,rounds:rounds.length,duration:rounds.reduce((sum,r)=>sum+Math.max(...r.map(p=>p.replay.frames))/60,0)};
+  return {id:randomUUID(),path:file,name:path.basename(file),players,rounds:rounds.length,duration:rounds.reduce((sum,round)=>sum+roundFrameCount(round),0)/60};
 }
 export function validateSettings(settings){
   const {outputDirectory,clientDirectory,backend='auto',width=1920,height=1080,fps=60}=settings||{};
@@ -27,7 +27,7 @@ export function validateSettings(settings){
   return {outputDirectory,clientDirectory,backend,width,height,fps};
 }
 async function outputPath(directory,input){
-  const stem=path.basename(input).replace(/\.ttrm$/i,'');
+  const stem=path.basename(input).replace(replayExtension,'');
   for(let i=0;i<1000;i++){
     const target=path.join(directory,`${stem}${i?'-'+(i+1):''}.mp4`);
     const candidates=[target,target.replace(/\.mp4$/,'-rounds')];

@@ -2,7 +2,8 @@ import {chromium,_electron} from 'playwright-core';
 import {mkdir,readFile,writeFile,rename,rm,mkdtemp} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
-import {patchClient} from './client.mjs';
+import {importReplay,patchClient} from './client.mjs';
+import {readReplay} from './replay.mjs';
 import {electronExecutable,engineEnvironment,resourcePath} from './runtime.mjs';
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const allowed=address=>{try{return /(^|\.)tetr\.io$/.test(new URL(address).hostname);}catch{return false;}};
@@ -28,8 +29,7 @@ export async function publishPreparedClient(staging,directory){
   }finally{if(moved&&published)await rm(backup,{recursive:true,force:true});}
 }
 export async function prepareClient({replayPath,directory,engine='electron',chrome,software=false,signal,onProgress=()=>{}}){
-  const replay=JSON.parse(await readFile(replayPath,'utf8'));
-  if(!Array.isArray(replay.replay?.rounds)||!replay.replay.rounds.length)throw Error('Add a two-player .ttrm replay before setting up game files');
+  const replayInput=await readReplay(replayPath);
   directory=path.resolve(directory);await mkdir(path.dirname(directory),{recursive:true});
   const staging=await mkdtemp(path.join(path.dirname(directory),'.prepare-client-'));
   await mkdir(path.join(staging,'objects'));
@@ -90,14 +90,14 @@ export async function prepareClient({replayPath,directory,engine='electron',chro
     check();await page.waitForFunction(()=>typeof window.DEVHOOK_LOAD_REPLAY_RAW==='function');
     report('Loading textures, fonts and audio',.4);
     await page.waitForFunction(()=>document.getElementById('preload')?.classList.contains('ready')&&document.getElementById('preload')?.classList.contains('hidden'));
-    check();report('Preparing files for your replay',.55);replay.id=null;
-    await page.evaluate(raw=>{
-      const data=new DataTransfer();data.items.add(new File([raw],'warmup.ttrm',{type:'application/json'}));
-      document.getElementById('menus').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:data}));
-    },JSON.stringify(replay));
-    await page.locator('#multilog .multilog_result').first().evaluate(element=>element.click());
+    check();report('Preparing files for your replay',.55);
+    const startSelector=await importReplay(page,replayInput);
+    await page.locator(startSelector).first().evaluate(element=>element.click());
     await page.waitForFunction(()=>!document.getElementById('replaytools').classList.contains('disabled'));
-    await page.evaluate(()=>{document.getElementById('replaytools_button_nextround').click();document.getElementById('replaytools_button_10x').click();});
+    await page.evaluate(singleplayer=>{
+      if(!singleplayer)document.getElementById('replaytools_button_nextround').click();
+      document.getElementById('replaytools_button_10x').click();
+    },replayInput.singleplayer);
     for(let i=0;i<25;i++){check();await page.waitForTimeout(1000);}
     report('Downloading backgrounds and music',.7);
     const urls=[...Array.from({length:35},(_,i)=>`https://tetr.io/res/bg/${i+1}.jpg`),'https://tetr.io/res/bgm/shikiichi-made-mousukoshi.mp3'];

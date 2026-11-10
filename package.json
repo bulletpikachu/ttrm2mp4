@@ -1,7 +1,7 @@
 {
   "name": "replay-render",
   "version": "1.0.0",
-  "description": "Render .ttrm replays to MP4 using TETR.IO\u2019s native WebGL player",
+  "description": "Render .ttr and .ttrm replays to MP4 using TETR.IO\u2019s native WebGL player",
   "scripts": {
     "render": "node src/render-auto.mjs",
     "render-portable": "node src/render.mjs",

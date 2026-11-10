@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { readFile, writeFile, mkdir, access, rename, mkdtemp, rm } from 'node:fs/promises';
+import { writeFile, mkdir, access, rename, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import ffmpeg from 'ffmpeg-static';
+import {readReplay,roundFrameCount} from './offline/replay.mjs';
 const worker = fileURLToPath(new URL('./render.mjs', import.meta.url));
 async function main() {
   const start = performance.now();
@@ -13,8 +14,8 @@ async function main() {
     encoder:{type:'string',default:'hardware'},queue:{type:'string',default:'8'},jobs:{type:'string',default:'2'},width:{type:'string',default:'1920'},height:{type:'string',default:'1080'},fps:{type:'string',default:'60'},
     client:{type:'string',default:'client'},chrome:{type:'string'},report:{type:'boolean'},overwrite:{type:'boolean'},help:{type:'boolean'},
   }});
-  if(o.help) return console.log('Usage: npm run render-parallel -- input.ttrm output.mp4 [--jobs 2] [--width 1920 --height 1080 --fps 60] [--report] [--overwrite]\nEach round is saved immediately in output-rounds/. The completed rounds are also joined without re-encoding.');
-  if(p.length!==2)throw Error('Provide input.ttrm and output.mp4.');
+  if(o.help) return console.log('Usage: npm run render-parallel -- input.ttr|input.ttrm output.mp4 [--jobs 2] [--width 1920 --height 1080 --fps 60] [--report] [--overwrite]\nEach round is saved immediately in output-rounds/. The completed rounds are also joined without re-encoding.');
+  if(p.length!==2)throw Error('Provide a .ttr or .ttrm replay and output.mp4.');
   if(!['hardware','software'].includes(o.encoder))throw Error('Unsupported encoder');
   if(!Number.isInteger(Number(o.queue))||Number(o.queue)<1||Number(o.queue)>240)throw Error('Unsupported queue');
   const jobs=Number(o.jobs);
@@ -22,9 +23,8 @@ async function main() {
   for(const k of ['width','height','fps'])if(!Number.isInteger(Number(o[k]))||Number(o[k])<1)throw Error(`Invalid ${k}`);
   if(Number(o.width)%2||Number(o.height)%2||Number(o.width)>3840||Number(o.height)>2160||Number(o.fps)>60)throw Error('Unsupported video settings.');
   const input=path.resolve(p[0]),output=path.resolve(p[1]);
-  if(!/\.ttrm$/i.test(input)||!/\.mp4$/i.test(output))throw Error('Expected .ttrm input and .mp4 output.');
-  const replay=JSON.parse(await readFile(input,'utf8')),rounds=replay.replay?.rounds;
-  if(!Array.isArray(rounds)||!rounds.length||rounds.some(r=>!Array.isArray(r)||r.length!==2||r.some(p=>!Number.isFinite(p.replay?.frames)||p.replay.frames<=0||!Array.isArray(p.replay.events))))throw Error('Expected complete two-player multiplayer replay data.');
+  if(!/\.mp4$/i.test(output))throw Error('Output must be an MP4.');
+  const {rounds}=await readReplay(input);
   const directory=output.replace(/\.mp4$/i,'-rounds'),reportFile=o.report?output.replace(/\.mp4$/i,'.json'):null;
   if(!o.overwrite)for(const target of reportFile?[output,directory,reportFile]:[output,directory]){
     try{await access(target);throw Error(`Output exists: ${target}. Use --overwrite.`)}catch(e){if(e.code!=='ENOENT')throw e}
@@ -35,7 +35,7 @@ async function main() {
   const stop=()=>{failed=true;for(const child of children)child.kill('SIGTERM')};
   process.once('SIGINT',stop);process.once('SIGTERM',stop);
   // Start longer rounds first to reduce idle time at the end of the pool.
-  const queue=rounds.map((r,i)=>({i,frames:Math.max(...r.map(p=>p.replay.frames))})).sort((a,b)=>b.frames-a.frames);
+  const queue=rounds.map((round,i)=>({i,frames:roundFrameCount(round)})).sort((a,b)=>b.frames-a.frames);
   console.log(`Rendering ${rounds.length} rounds with ${Math.min(jobs,rounds.length)} workers at ${o.width}×${o.height}/${o.fps} fps.`);
   try{
     await Promise.all(Array.from({length:Math.min(jobs,rounds.length)},async()=>{

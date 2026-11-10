@@ -10,7 +10,11 @@ try{
   await writeFile(path.join(client,'manifest.json'),JSON.stringify({format:1,entries:{}}));
   const input=path.join(temp,'sample.ttrm');await writeFile(input,JSON.stringify({replay:{rounds:[[{replay:{frames:60,events:[]}},{replay:{frames:60,events:[]}}]]}}));
   const file=await inspectReplay(input);assert.equal(file.rounds,1);assert.equal(file.duration,1);
-  await assert.rejects(inspectReplay(path.join(temp,'missing.txt')),/\.ttrm/);
+  const soloInput=path.join(temp,'sprint.TTR');
+  await writeFile(soloInput,JSON.stringify({version:1,users:[{username:'player'}],replay:{frames:120,events:[]}}));
+  const solo=await inspectReplay(soloInput);
+  assert.equal(solo.duration,2);assert.equal(solo.rounds,1);assert.equal(solo.players,undefined);
+  await assert.rejects(inspectReplay(path.join(temp,'missing.txt')),/\.ttr or \.ttrm/);
   const settings={clientDirectory:client,outputDirectory:output,backend:'auto',width:1920,height:1080,fps:60};
   assert.throws(()=>validateSettings({...settings,width:1919}),/dimensions/);
   assert.throws(()=>validateSettings({...settings,outputDirectory:'relative'}),/output folder/);
@@ -23,7 +27,7 @@ try{
     return spawn(process.execPath,['-e',`require('node:fs').writeFileSync(process.argv[1],'new export');process.send({type:'render-event',event:{type:'progress',seconds:1}});process.disconnect();`,args[2]],options);
   }});
   const appearance=path.join(temp,'imported appearance.json');
-  jobs.on('event',event=>events.push(event));jobs.start([file],{...settings,duration:2},appearance);
+  jobs.on('event',event=>events.push(event));jobs.start([file,solo],{...settings,duration:2},appearance);
   assert.throws(()=>jobs.start([file],settings),/already running/);
   await jobs.active.done;
   assert.equal(launches[0][launches[0].indexOf('--backend')+1],'auto');
@@ -31,7 +35,7 @@ try{
   assert.deepEqual(launches[0].slice(-2),['--appearance',appearance]);
   assert.equal(await readFile(path.join(output,'sample.mp4'),'utf8'),'existing export');
   assert.equal(await readFile(oldReport,'utf8'),'existing report');
-  assert.equal(events.find(e=>e.type==='finished').output,path.join(output,'sample-2.mp4'));
+  assert.deepEqual(events.filter(e=>e.type==='finished').map(e=>e.output),[path.join(output,'sample-2.mp4'),path.join(output,'sprint.mp4')]);
   assert(events.some(e=>e.type==='progress'));assert(events.some(e=>e.type==='done'));assert.equal(jobs.active,null);
   const failed=new RenderJobs({root:temp,executable:process.execPath,userData:temp,spawnWorker:(_exe,_args,options)=>spawn(process.execPath,['-e',"console.error('Encoder unavailable');process.exit(2)"],options)});
   const failures=[];failed.on('event',event=>failures.push(event));failed.start([file],settings);await failed.active.done;

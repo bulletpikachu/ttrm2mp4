@@ -140,7 +140,7 @@ window.__createRawEncoder = ({width,height,fps}) => {
   return {
     qualityInputsOnly:!!options.qualityInputsOnly,
     async beforeFrame(){if(failure)throw failure;const t=__timeline.wallNow();if(!free.length)await new Promise((resolve,reject)=>waiters.push({resolve,reject}));metrics.waitMs+=__timeline.wallNow()-t;current=free.pop()},
-    compose({spans,font,roundCount}){
+    compose({label,font}){
       if(implicitResolve&&(gl._drawingBuffer.msFbo||gl._drawingBuffer.width!==width||gl._drawingBuffer.height!==height))throw Error('Implicit export framebuffer was resized or replaced');
       const start=__timeline.wallNow();
       saved(()=>{
@@ -148,9 +148,8 @@ window.__createRawEncoder = ({width,height,fps}) => {
         if(directTexture)gl._drawingBuffer.resolve();
         else{gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);gl.copyTexSubImage2D(gl.TEXTURE_2D,0,0,0,0,0,width,height);}
         gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,header);
-        const label=JSON.stringify(spans);
         if(headerLabel!==label){
-          text.clearRect(0,0,width,headerCanvas.height);text.fillStyle='#080808dd';text.fillRect(0,0,width,height*.065);text.fillStyle='#ff8a00';text.font=`bold ${Math.round(height*.035)}px ${font}`;text.fillText('REPLAY',width*.02,height*.045);text.fillStyle='white';text.font=`${Math.round(height*.027)}px ${font}`;text.fillText(`${spans[0]||''} VS ${spans[1]||''}${spans[2]?` · ROUND ${spans[2]} / ${roundCount}`:''}`,width*.15,height*.043);
+          text.clearRect(0,0,width,headerCanvas.height);text.fillStyle='#080808dd';text.fillRect(0,0,width,height*.065);text.fillStyle='#ff8a00';text.font=`bold ${Math.round(height*.035)}px ${font}`;text.fillText('REPLAY',width*.02,height*.045);text.fillStyle='white';text.font=`${Math.round(height*.027)}px ${font}`;text.fillText(label,width*.15,height*.043);
           const premultiplied=gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL),flip=gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL);
           gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,headerCanvas);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,premultiplied);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,flip);headerLabel=label;
         }
