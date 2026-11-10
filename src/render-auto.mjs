@@ -42,6 +42,7 @@ Automatically select a prepared native backend, or the portable Chrome renderer.
   --jobs N        Drawing workers (automatic CPU/memory default, Windows native only)
   --threads N     CPU encoding threads (automatic default; Mac or portable only)
   --width N --height N --fps N --client PATH --overwrite
+  --rounds LIST   Export selected multiplayer rounds, e.g. 1,3,5
   --report        Write a JSON diagnostic report beside the MP4
   --duration N / --round N use the portable path on Windows.
 Native startup is checked with a temporary short export before selecting it.
@@ -56,9 +57,10 @@ Use npm run render-portable -- --help for all portable renderer options.`);
   let jobs=values.jobs===undefined?defaults.jobs:positiveInteger(values.jobs,'jobs',8);
   const threads=values.threads===undefined?undefined:positiveInteger(values.threads,'threads',256);
   const appearance=optionValue(args,'appearance');
+  const roundList=optionValue(args,'rounds');
   // Locate input/output with the renderer's public option schema; unknown options
   // stay intact and are diagnosed by the selected renderer.
-  const valueOptions=new Set(['width','height','fps','client','appearance','duration','round','chrome','encoder','queue','latency','profile','quality-samples','quality-interval','encoder-rate','engine','raw-format','surface-encoder','surface-reference','render-side','worker-rounds','worker-audio','worker-video-dir','worker-frames']);
+  const valueOptions=new Set(['width','height','fps','client','appearance','duration','round','rounds','chrome','encoder','queue','latency','profile','quality-samples','quality-interval','encoder-rate','engine','raw-format','surface-encoder','surface-reference','render-side','worker-rounds','worker-audio','worker-video-dir','worker-frames']);
   const positionals=[];
   for(let i=0;i<args.length;i++){
     const arg=args[i];
@@ -68,7 +70,7 @@ Use npm run render-portable -- --help for all portable renderer options.`);
   }
   if(positionals.length<1||positionals.length>2)throw Error('Provide a .ttr or .ttrm replay and an optional output.mp4. Use --help for usage.');
   // Validate the input before probing, so input errors never look like GPU failures.
-  await readReplay(positionals[0]);
+  const {roundNumbers}=await readReplay(positionals[0],roundList);
   let nativeThreads=threads??defaults.nativeThreads;
   const selection=await selectBackend({requested,platform:process.platform,arch:process.arch,args,threadsRequested:threads!==undefined,probe:async backend=>{
     if(backend==='mac'&&threads===undefined&&process.env.REPLAY_X264_THREADS!==undefined)nativeThreads=positiveInteger(process.env.REPLAY_X264_THREADS,'REPLAY_X264_THREADS',32);
@@ -80,9 +82,10 @@ Use npm run render-portable -- --help for all portable renderer options.`);
     const temporary=await mkdtemp(path.join(tmpdir(),'replay-backend-check-'));
     try{
       const dimensions=['--width',String(width),'--height',String(height),'--fps',optionValue(args,'fps','60'),'--client',optionValue(args,'client',defaultClientDirectory)];
-      const preview=[path.resolve(positionals[0]),path.join(temporary,'check.mp4'),...dimensions,...(appearance?['--appearance',appearance]:[]),'--duration','0.1'];
+      const preview=[path.resolve(positionals[0]),path.join(temporary,'check.mp4'),...dimensions,...(appearance?['--appearance',appearance]:[]),...(roundNumbers?['--rounds',roundNumbers.join(',')]:[]),'--duration','0.1'];
       if(backend==='mac')await run('src/render-fast.mjs',[...preview,'--threads',String(nativeThreads)],{probe:true});
       else{
+        if(roundNumbers)jobs=Math.min(jobs,roundNumbers.length);
         const env={...windowsFastEnvironment(),REPLAY_GL_BATCH:'1',REPLAY_GL_ASYNC:'1',REPLAY_WINDOWS_ASYNC:'1',REPLAY_WINDOWS_FENCE:'1',REPLAY_WINDOWS_NV12:'1'};
         // Verify that a single renderer works before testing concurrent sessions.
         await run('src/render.mjs',[...preview,'--engine','electron','--native-webgl','--windows-encoder','--export-rounds','--deterministic'],

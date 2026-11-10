@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('replayRender',{
   queueReady:()=>ipcRenderer.invoke('queue:ready'),
   editQueue:id=>ipcRenderer.invoke('queue:edit',id),
   setLeftPlayer:(id,playerId)=>ipcRenderer.invoke('queue:left-player',id,playerId),
+  setRounds:(id,rounds)=>ipcRenderer.invoke('queue:rounds',id,rounds),
   reveal:file=>ipcRenderer.invoke('queue:reveal',file),
   onQueue:callback=>subscribe('queue:state',callback),
   onQueueEdit:callback=>subscribe('queue:edit',callback),

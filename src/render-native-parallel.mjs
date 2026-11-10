@@ -31,7 +31,7 @@ async function publishFile(source,target){
 async function main(){
   const start=performance.now();
   const hostTimings={};
-  const {values:o,positionals:p}=parseArgs({allowPositionals:true,options:{backend:{type:'string',default:'mac'},jobs:{type:'string'},threads:{type:'string'},width:{type:'string',default:'1920'},height:{type:'string',default:'1080'},fps:{type:'string',default:'60'},client:{type:'string',default:defaultClientDirectory},appearance:{type:'string'},'central-encoder':{type:'boolean'},'stream-audio':{type:'boolean'},'quality-inputs-only':{type:'boolean'},'quality-samples':{type:'string'},'quality-interval':{type:'string',default:'2'},report:{type:'boolean'},overwrite:{type:'boolean'},help:{type:'boolean'}}});
+  const {values:o,positionals:p}=parseArgs({allowPositionals:true,options:{backend:{type:'string',default:'mac'},jobs:{type:'string'},threads:{type:'string'},width:{type:'string',default:'1920'},height:{type:'string',default:'1080'},fps:{type:'string',default:'60'},client:{type:'string',default:defaultClientDirectory},appearance:{type:'string'},rounds:{type:'string'},'central-encoder':{type:'boolean'},'stream-audio':{type:'boolean'},'quality-inputs-only':{type:'boolean'},'quality-samples':{type:'string'},'quality-interval':{type:'string',default:'2'},report:{type:'boolean'},overwrite:{type:'boolean'},help:{type:'boolean'}}});
   const windows=o.backend==='windows';if(!['mac','windows'].includes(o.backend))throw Error('backend must be mac or windows');
   const mfAudio=windows&&process.env.REPLAY_WINDOWS_MF_AUDIO==='1';
   const dedicatedAudio=windows&&(mfAudio||process.env.REPLAY_DEDICATED_AUDIO==='1');
@@ -60,7 +60,7 @@ async function main(){
   const reportFile=o.report?output.replace(/\.mp4$/i,'.json'):null;
   const appearance=o.appearance&&path.resolve(o.appearance);
   if(!/\.mp4$/i.test(output))throw Error('Output must be an MP4');
-  const {rounds}=await readReplay(input);
+  const {rounds,roundNumbers}=await readReplay(input,o.rounds);
   if(!o.overwrite)for(const target of reportFile?[output,directory,reportFile]:[output,directory]){try{await access(target);throw Error('Output exists: '+target)}catch(error){if(error.code!=='ENOENT')throw error}}
   await mkdir(path.dirname(output),{recursive:true});await mkdir(directory,{recursive:true});
   const temp=await mkdtemp(path.join(windows?tmpdir():path.dirname(output),windows?'replay-win-parallel-':'.replay-render-parallel-'));
@@ -88,6 +88,7 @@ async function main(){
   process.once('SIGINT',stop);process.once('SIGTERM',stop);
   function launch(name,selection,audio=false,frameWindow=null){
     const stem=path.join(temp,name),args=[worker,input,stem+'.mp4','--engine','electron','--native-webgl',windows?'--windows-encoder':'--native-encoder','--export-rounds','--worker-rounds',selection.length?selection.join(','):'none','--width',String(width),'--height',String(height),'--fps',String(fps),'--client',path.resolve(o.client),'--worker-video-dir',rawDirectory,'--overwrite'];
+    if(roundNumbers)args.push('--rounds',roundNumbers.join(','));
     if(appearance)args.push('--appearance',appearance);
     if(audio)args.push('--worker-audio',path.join(temp,'master.f32'));
     if(frameWindow)args.push('--worker-frames',JSON.stringify(frameWindow));
@@ -168,14 +169,16 @@ async function main(){
   async function publish(report){
     if(seen.has(report.round))throw Error('Round was produced twice: '+report.round);seen.add(report.round);
     if(!Number.isInteger(report.round)||report.round<1||report.round>rounds.length||report.partial||report.fps!==fps||report.sampleRate!==48000)throw Error('Invalid worker round report');
+    const sourceRound=roundNumbers?.[report.round-1]??report.round;
+    const target=path.join(directory,`round-${String(sourceRound).padStart(2,'0')}.mp4`);
     if(dedicatedAudio){
       await leaderReady;if(report.audioFromLeader!==true||report.pcmSha256!==null)throw Error('Invalid video-only round report');
       const expected=leader.timelineRounds.find(round=>round.round===report.round);if(!expected||expected.startFrame!==report.startFrame||expected.endFrame!==report.endFrame)throw Error('Video-only round timeline differs from audio leader');
       const first=Math.round(report.startFrame/fps*leader.sampleRate)*8,last=Math.round(report.endFrame/fps*leader.sampleRate)*8,pcm=path.join(rawDirectory,`round-${report.round}.f32`),expectedPCM=leaderPCM.subarray(first,last);
       await writeFile(pcm,expectedPCM,{flag:'wx'});const written=await readFile(pcm);if(!written.equals(expectedPCM))throw Error('Written round PCM differs from the complete audio leader');report.pcmSha256=createHash('sha256').update(written).digest('hex');verifyRoundAudio(report);
       pendingAudio.set(report.round,report);pumpVideo();
-      const target=path.join(directory,`round-${String(report.round).padStart(2,'0')}.mp4`);await packageRound(report,pcm,target);
-      const published={...report,...(mfAudio?{audioEncoder:"aac_mf"}:{}),path:target,publishedSeconds:(performance.now()-start)/1000};reports.set(report.round,published);console.log(`Round ${report.round} saved: ${target} (${published.publishedSeconds.toFixed(2)}s elapsed; continuous leader PCM verified)`);return;
+      await packageRound(report,pcm,target);
+      const published={...report,...(mfAudio?{audioEncoder:"aac_mf"}:{}),path:target,publishedSeconds:(performance.now()-start)/1000};reports.set(report.round,published);console.log(`Round ${sourceRound} saved: ${target} (${published.publishedSeconds.toFixed(2)}s elapsed; continuous leader PCM verified)`);return;
     }
     if(!o['stream-audio']){await leaderReady;verifyRoundAudio(report);}
     else{
@@ -192,10 +195,9 @@ async function main(){
         }
       }
     }
-    const target=path.join(directory,`round-${String(report.round).padStart(2,'0')}.mp4`);
     await publishFile(report.path,target);
     const published={...report,path:target,publishedSeconds:(performance.now()-start)/1000};reports.set(report.round,published);
-    console.log(`Round ${report.round} saved: ${target} (${published.publishedSeconds.toFixed(2)}s elapsed${published.pcmMatchesMaster?'; continuous PCM verified':''})`);
+    console.log(`Round ${sourceRound} saved: ${target} (${published.publishedSeconds.toFixed(2)}s elapsed${published.pcmMatchesMaster?'; continuous PCM verified':''})`);
   }
   try{
     if(o['central-encoder']){
@@ -278,6 +280,7 @@ async function main(){
       report.workers.forEach((worker,i)=>{worker.localClientTransport=workerReports[i].localClientTransport;});
       if(process.env.REPLAY_WINDOWS_NATIVE_CLIENT==='1'&&(leader.localClientTransport!=='electron-protocol'||workerReports.some(worker=>worker.localClientTransport!=='electron-protocol')))throw Error('Requested Electron client transport was not used by every worker');
     }
+    if(roundNumbers)report.sourceRounds=roundNumbers;
     if(reportFile)await writeFile(reportFile,JSON.stringify(report,null,2)+'\n');
     emitRenderEvent('completed',reportFile?{output,report:reportFile}:{output});
     console.log(`Saved ${output}\n${duration.toFixed(2)}s video in ${elapsedSeconds.toFixed(2)}s total (${report.speedup.toFixed(2)}× real time).`);

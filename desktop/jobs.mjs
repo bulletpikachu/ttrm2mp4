@@ -15,7 +15,7 @@ export async function inspectReplay(file){
     &&leaderboard.every(player=>typeof player?.id==='string'&&player.id&&typeof player.username==='string')
     &&leaderboard[0].id!==leaderboard[1].id
     ?leaderboard.map(({id,username})=>({id,username})):undefined;
-  return {id:randomUUID(),path:file,name:path.basename(file),players,rounds:rounds.length,duration:rounds.reduce((sum,round)=>sum+roundFrameCount(round),0)/60};
+  return {id:randomUUID(),path:file,name:path.basename(file),players,singleplayer,rounds:rounds.length,duration:rounds.reduce((sum,round)=>sum+roundFrameCount(round),0)/60};
 }
 export function validateSettings(settings){
   const {outputDirectory,clientDirectory,backend='auto',width=1920,height=1080,fps=60}=settings||{};
@@ -58,7 +58,9 @@ export class RenderJobs extends EventEmitter{
         const output=await outputPath(settings.outputDirectory,file.path);
         if(job.cancelled)break;
         send({type:'started',fileId:item.id,output});
-        const args=[file.path,output,'--client',settings.clientDirectory,'--backend',settings.backend,'--width',String(settings.width),'--height',String(settings.height),'--fps',String(settings.fps),...(appearance?['--appearance',appearance]:[])];
+        const args=[file.path,output,'--client',settings.clientDirectory,'--backend',settings.backend,'--width',String(settings.width),'--height',String(settings.height),'--fps',String(settings.fps)];
+        if(item.selectedRounds)args.push('--rounds',item.selectedRounds.join(','));
+        if(appearance)args.push('--appearance',appearance);
         await new Promise((resolve,reject)=>{
           const child=this.spawnWorker(this.executable,[path.join(this.root,'desktop/worker.cjs'),...args],{
             cwd:this.userData,detached:process.platform!=='win32',windowsHide:true,stdio:['ignore','pipe','pipe','ipc'],

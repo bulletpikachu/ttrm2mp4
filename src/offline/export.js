@@ -1,4 +1,4 @@
-window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSeconds, roundCount, singleplayer = false, queue = 8, encoderMode = "hardware", latencyMode = "quality", encoderRate = null, selectedRounds = null, deterministic = false,qualityInterval=2,roundFrameLimits=[],stopAfterSelected=false,videoOnlyWorker=false,frameWindow=null }) {
+window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSeconds, roundCount, roundNumbers, singleplayer = false, queue = 8, encoderMode = "hardware", latencyMode = "quality", encoderRate = null, selectedRounds = null, deterministic = false,qualityInterval=2,roundFrameLimits=[],stopAfterSelected=false,videoOnlyWorker=false,frameWindow=null }) {
   const native = window.__native;
   const soloGames = singleplayer ? [native.soloReplay] : null;
   const microtaskQueue=typeof process!=='undefined'&&process.env.REPLAY_MICROTASK_QUEUE==='1';
@@ -141,6 +141,7 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     timings.simulation += wallNow()-measuredAt;measuredAt=wallNow();
     const spans = [...document.getElementById('data_replay').querySelectorAll(':scope > span')].map(el => el.textContent);
     const id=Number(spans[2]||1),shouldRender=frameWindow?count>=frameWindow.startFrame:!selection||selection.has(id);
+    const sourceRound=roundNumbers?.[id-1]??spans[2];
     if(!frameWindow&&selection?.has(id+1)&&Math.max(0,...games.map(game=>game.getFrame()))>=roundFrameLimits[id-1]-120)warmingRounds.add(id);
     const warmPrevious=frameWindow?count>=Math.max(0,frameWindow.startFrame-frameWindow.warmupFrames)&&count<frameWindow.startFrame:warmingRounds.has(id);
     if(id!==timelineRound){
@@ -168,7 +169,7 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     if(!shouldRender){let record=warmups.get(id);if(!record){record={round:id,firstFrame:count,lastFrame:count,frames:0};warmups.set(id,record)}record.lastFrame=count;record.frames++;timings.warmDraw+=wallNow()-measuredAt;}
     }
     if(shouldRender){
-    const label = singleplayer ? spans.filter(Boolean).join(' · ') : `${spans[0] || ''} VS ${spans[1] || ''}${spans[2] ? ` · ROUND ${spans[2]} / ${roundCount}` : ''}`;
+    const label = singleplayer ? spans.filter(Boolean).join(' · ') : `${spans[0] || ''} VS ${spans[1] || ''}${sourceRound ? ` · ROUND ${sourceRound} / ${roundCount}` : ''}`;
     if(rawEncoder?.compose)rawEncoder.compose({native,label,font});
     else {
     draw.drawImage(native.app.view, 0, 0, width, height);
@@ -209,7 +210,7 @@ window.__exportMovie = async function ({ fps, width, height, limitSeconds, maxSe
     if (i % ((selection||__timeline.fastYield&&rawEncoder)?fps*10:fps) === 0) {
       if(phaseTimings)measuredAt=wallNow();
       await pending;
-      await window.__renderProgress({ seconds: count / fps, round: spans[2], frames: games.map(g => g.getFrame()) });
+      await window.__renderProgress({ seconds: count / fps, round: sourceRound, frames: games.map(g => g.getFrame()) });
       if(phaseTimings){timings.progress+=wallNow()-measuredAt;measuredAt=wallNow();}
       await window.__timeline.yield();
       if(phaseTimings)timings.yield+=wallNow()-measuredAt;

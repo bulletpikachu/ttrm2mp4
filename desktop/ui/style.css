@@ -124,7 +124,9 @@ h1 span { color: #b4232b; }
 .file-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .file-info small { display: block; }
 .file-heading .player-order-toggle { flex-shrink: 0; padding: 0 2px; font-size: 10px; }
-.player-order {
+.file-meta { display: flex; align-items: baseline; gap: 4px; }
+.file-meta .rounds-toggle { padding: 0 2px; font-size: 10px; }
+.player-order, .round-picker {
   inset: auto;
   position-area: bottom span-left;
   position-try-fallbacks: flip-block;
@@ -139,6 +141,21 @@ h1 span { color: #b4232b; }
 .player-order:popover-open { display: flex; align-items: center; gap: 6px; }
 .player-order-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .player-order .secondary { min-height: 22px; padding: 2px 4px; font-size: 10px; }
+.round-picker { width: 210px; padding: 8px; }
+.round-picker legend { font-weight: 700; }
+.round-picker-actions { display: flex; gap: 8px; }
+.round-picker-actions .text { padding: 3px 0; font-size: 11px; }
+.round-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  max-height: min(102px, 31vh);
+  padding: 3px;
+  overflow: auto;
+}
+.round-options label { display: flex; align-items: center; gap: 4px; margin: 0; font-weight: 400; }
+.round-options input { margin: 0; }
+.round-picker .secondary { display: block; min-height: 22px; margin: 5px 0 0 auto; padding: 2px 8px; font-size: 11px; }
 .queue-error { margin: 2px 0 0; overflow: auto; font-size: 10px; color: var(--accent); }
 .text, .remove { border: 0; background: transparent; color: var(--accent); }
 .text { padding: 5px 2px; white-space: nowrap; font-size: 12px; }

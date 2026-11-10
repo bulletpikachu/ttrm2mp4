@@ -39,6 +39,7 @@ First run: npm run prepare-client -- example.ttrm (downloads client/assets once)
   --height N      Even video height (default 1080)
   --fps N         Output frame rate, integer 1–60 (default 60)
   --round N       Export one round, 1-based (default entire match)
+  --rounds LIST   Export selected multiplayer rounds, e.g. 1,3,5
   --export-rounds Save completed rounds with continuous match audio
   --duration N    Export a short preview, including countdown
   --client PATH   Local client directory (default ./client)
@@ -74,7 +75,7 @@ async function main() {
   const hostTimings={},mark=name=>{hostTimings[name]=(performance.now()-wallStart)/1000};
   const { values: options, positionals } = parseArgs({ allowPositionals: true, options: {
     width: { type: 'string', default: '1920' }, height: { type: 'string', default: '1080' },
-    fps: { type: 'string', default: '60' }, round: { type: 'string' }, duration: { type: 'string' },
+    fps: { type: 'string', default: '60' }, round: { type: 'string' }, rounds: { type: 'string' }, duration: { type: 'string' },
     appearance: { type: 'string' },
     client: { type: 'string', default: defaultClientDirectory }, chrome: { type: 'string' }, headed: { type: 'boolean' },
     'worker-rounds':{type:'string'}, 'worker-audio':{type:'string'}, 'worker-video-dir':{type:'string'},
@@ -136,8 +137,9 @@ async function main() {
   const qualityInterval=number(options['quality-interval'],'quality interval',Infinity,false);
   if (width % 2 || height % 2) throw Error('Video dimensions must be even.');
   const input = path.resolve(positionals[0]);
-  const replayInput = await readReplay(input);
-  const {replay,rounds,singleplayer} = replayInput;
+  if (options.round !== undefined && options.rounds !== undefined) throw Error('Use either --round or --rounds');
+  const replayInput = await readReplay(input, options.rounds);
+  const {replay,rounds,singleplayer,roundNumbers,sourceRoundCount=rounds.length} = replayInput;
   const leftPlayer=process.env.REPLAY_LEFT_PLAYER;
   if(leftPlayer&&!singleplayer){
     const leaderboard=replay.replay.leaderboard;
@@ -313,7 +315,8 @@ async function main() {
       await page.exposeBinding('__finishRound',async(_,data)=>{
         await roundVideo?.close();roundVideo=null;await roundAudio.close();roundAudio=null;
         const pcmSha256=videoOnlyWorker?null:cpuEncoder||directIO?createHash('sha256').update(await readFile(path.join(temp,'round.f32'))).digest('hex'):roundHash.digest('hex');
-        const name=`round-${String(data.round).padStart(2,'0')}${data.partial?'-partial':''}.mp4`;
+        const sourceRound=roundNumbers?.[data.round-1]??data.round;
+        const name=`round-${String(sourceRound).padStart(2,'0')}${data.partial?'-partial':''}.mp4`;
         const target=path.join(roundsDirectory,name),stem=path.join(temp,`round-${data.round}`),staged=stem+'.mp4';
         await rename(path.join(temp,'round.h264'),stem+'.h264');await rename(path.join(temp,'round.f32'),stem+'.f32');
         if(selectedRounds===null&&process.env.REPLAY_STREAM_MUX==='1'){
@@ -333,8 +336,8 @@ async function main() {
         const publication=(async()=>{
           await runEncoder(stem+'.h264',stem+'.f32',staged,fps,data.sampleRate,false,data.endFrame-data.startFrame);await publishFile(staged,target);
           report.publishedSeconds=(performance.now()-wallStart)/1000;
-          emitRenderEvent('round',{round:data.round,path:target,partial:data.partial});
-          console.log(`Round ${data.round}${data.partial?' preview':''} saved: ${target}`);
+          emitRenderEvent('round',{round:sourceRound,path:target,partial:data.partial});
+          console.log(`Round ${sourceRound}${data.partial?' preview':''} saved: ${target}`);
           if(process.connected)process.send({type:'round',report});
         })().catch(error=>{roundPublicationFailure??=error});
         roundPublications.push(publication);
@@ -346,10 +349,10 @@ async function main() {
     }
     let previousRound;
     await page.exposeBinding('__renderProgress', (_, data) => {
-      emitRenderEvent('progress',{...data,totalSeconds:limitSeconds?Math.min(expected,limitSeconds):expected,roundCount:rounds.length,singleplayer});
+      emitRenderEvent('progress',{...data,totalSeconds:limitSeconds?Math.min(expected,limitSeconds):expected,roundCount:sourceRoundCount,singleplayer});
       if (data.stage) { console.log(`${((performance.now() - exportStart) / 1000).toFixed(2)}s: ${data.stage}`); return; }
       const currentRound = data.round || round || 1;
-      if (currentRound !== previousRound) { console.log(singleplayer?'Rendering single-player replay…':`Rendering round ${currentRound} / ${rounds.length}…`); previousRound = currentRound; }
+      if (currentRound !== previousRound) { console.log(singleplayer?'Rendering single-player replay…':`Rendering round ${currentRound} / ${sourceRoundCount}…`); previousRound = currentRound; }
     });
     if(options['surface-encoder'])await page.addScriptTag({path:path.join(here,options['surface-stream']?'experimental/surface-stream-renderer.js':'experimental/surface-renderer.js')});
     if(options['raw-encoder']){
@@ -385,7 +388,7 @@ async function main() {
     const exportStart = performance.now();
     mark('exportStarted');
     if(options['native-webgl'])await page.evaluate(()=>{window.__exportCPUStart=process.cpuUsage()});
-    const result = await page.evaluate(options => __exportMovie(options), { fps, width, height, limitSeconds, maxSeconds, roundCount: rounds.length, singleplayer, queue, encoderMode: options.encoder, latencyMode: options.latency, encoderRate, selectedRounds, deterministic,qualityInterval,videoOnlyWorker,frameWindow,stopAfterSelected:windowsEncoder&&process.env.REPLAY_WORKER_PREFIX==='1',roundFrameLimits });
+    const result = await page.evaluate(options => __exportMovie(options), { fps, width, height, limitSeconds, maxSeconds, roundCount: sourceRoundCount, roundNumbers, singleplayer, queue, encoderMode: options.encoder, latencyMode: options.latency, encoderRate, selectedRounds, deterministic,qualityInterval,videoOnlyWorker,frameWindow,stopAfterSelected:windowsEncoder&&process.env.REPLAY_WORKER_PREFIX==='1',roundFrameLimits });
     result.graphicsPreset=await page.evaluate(()=>window.__native.settings.video.graphics);
     if (appearance) {
       result.appearance={
@@ -454,6 +457,7 @@ async function main() {
     const elapsedSeconds = (performance.now() - wallStart) / 1000;
     const report = { input, output:selectedRounds===null?output:null, workerAudio:options['worker-audio']?path.resolve(options['worker-audio']):null, clientVersion: cache.manifest.hardVersion, networkingDisabled: true, width, height, fps, rounds:roundReports, ...result, renderSeconds, elapsedSeconds, hostTimings, speedup: result.duration / elapsedSeconds, renderSpeedup: result.duration / renderSeconds, missingAssets, clientErrors };
     report.localClientTransport=cache.transport;
+    if(roundNumbers)report.sourceRounds=roundNumbers;
     if(reportFile)await writeFile(reportFile, JSON.stringify(report, null, 2) + '\n');
     if(process.connected&&process.env.REPLAY_WORKER_RESULT==='1'){
       await new Promise((resolve,reject)=>process.send({type:'render-result',report},error=>error?reject(error):resolve()));

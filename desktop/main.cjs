@@ -60,6 +60,7 @@ if(process.env.REPLAY_ENGINE_ENTRY){
   async function start(){
     app.dock?.setIcon(appIcon);
     const {RenderJobs,inspectReplay,validateSettings}=await import('./jobs.mjs');
+    const {validateRoundSelection}=await import('../src/offline/replay.mjs');
     const {ClientSetup,clientReady}=await import('./setup.mjs');
     const {storedAppearance,summarizeAppearance,updateAppearance,readImport}=await import('./appearance.mjs');
     let importing=false;
@@ -85,7 +86,10 @@ if(process.env.REPLAY_ENGINE_ENTRY){
     let queueState={files:[],busy:false};
     const sendQueue=()=>queueWindow?.webContents.send('queue:state',{
       ...queueState,
-      files:queueState.files.map(file=>({...file,leftPlayer:files.get(file.id)?.leftPlayer})),
+      files:queueState.files.map(file=>{
+        const replay=files.get(file.id);
+        return {...file,leftPlayer:replay?.leftPlayer,selectedRounds:replay?.selectedRounds};
+      }),
     });
     handle('queue:open',async()=>{
       if(queueWindow){
@@ -122,6 +126,15 @@ if(process.env.REPLAY_ENGINE_ENTRY){
       if(!row||!replay?.players?.some(player=>player.id===playerId))throw Error('Unknown replay or player');
       if(row.status==='Complete')return;
       replay.leftPlayer=playerId;
+      sendQueue();
+    },true);
+    handle('queue:rounds',(id,rounds)=>{
+      const row=queueState.files.find(file=>file.id===id);
+      const replay=files.get(id);
+      if(!row||!replay||replay.singleplayer)throw Error('Choose a multiplayer replay');
+      if(queueState.busy||jobs.active||setup.active||row.status==='Complete')throw Error('This replay is locked for export');
+      const selection=validateRoundSelection(rounds,replay.rounds);
+      replay.selectedRounds=selection.length===replay.rounds?undefined:selection;
       sendQueue();
     },true);
     handle('render:initial',async()=>{const settings={outputDirectory:app.getPath('videos'),clientDirectory:initialClient,backend:'auto',width:1920,height:1080,fps:60,...preferences()};return {settings,platform:process.platform,clientReady:await clientReady(settings.clientDirectory),appearance:summarizeAppearance(await storedAppearance(appearancePath))};});

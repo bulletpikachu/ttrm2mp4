@@ -37,7 +37,7 @@ export function optionValue(args,name,fallback) {
   const {values}=extractOptions(args,[name]);return values[name]??fallback;
 }
 export function nativeOptionsSupported(args,backend) {
-  const common=new Set(['width','height','fps','client','appearance','overwrite','report','export-rounds','deterministic','quality-samples','quality-interval']);
+  const common=new Set(['width','height','fps','client','appearance','overwrite','report','rounds','export-rounds','deterministic','quality-samples','quality-interval']);
   if(backend==='mac'){for(const name of ['duration','round','profile'])common.add(name);}
   return args.every(arg=>!arg.startsWith('--')||common.has(arg.slice(2).split('=')[0]));
 }

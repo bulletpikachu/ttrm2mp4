@@ -11,6 +11,8 @@ npm run desktop
 
 Drop `.ttr` or `.ttrm` files onto the artwork, or use **Choose replay files**. Use the settings on the right to pick an output folder, resolution, frame rate, or backend. The left column shows the current run’s logs. Press **Render** to start. Exports run one at a time, and **Queue** opens the sketchbook window with queued replays and links to completed videos. If an output filename is already in use, the app picks the next available name. Drag the top of the artwork to move the window, or resize from the edges to keep its original proportions.
 
+For a multiplayer replay, open **All rounds** in its queue row, check the rounds you want, then click **Apply**. The MP4 contains the chosen rounds in match order. Individual round files keep their original round numbers.
+
 On first use, add a replay and click **Set up & render**. The app downloads TETR.IO files with its bundled browser, verifies the downloaded objects, checks an offline preview, then renders the replay. You can also use **Set up TETR.IO files** in the settings column to download without rendering. Setup needs an internet connection and may take a minute or two. No installed TETR.IO game, Chrome, or command-line setup is required.
 
 Game files are stored as separate versioned caches in the app's data folder. Setup uses a fresh browser session and does not read or modify your installed game or account. A failed or cancelled refresh keeps the previous cache selected. In the settings column, you can select an existing renderer cache or download fresh files. Preferences and decoded audio caches are written to the user's application-data folder, never the installed app folder.
@@ -48,6 +50,7 @@ Use the same command on every machine:
 
 ```sh
 npm run render -- example.ttrm output.mp4
+npm run render -- example.ttrm highlights.mp4 --rounds 1,3,5
 npm run render -- sprint.ttr sprint.mp4
 ```
 
