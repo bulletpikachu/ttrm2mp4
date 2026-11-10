@@ -72,7 +72,7 @@ npm run prepare-client -- "C:\path\example.ttrm"
 npm run render -- "C:\path\example.ttrm" output/preview.mp4 --duration 10 --export-rounds --deterministic
 ```
 
-The default is 1920×1080 at 60 fps with continuous stereo AAC audio. The browser encoder is tested before exporting: automatic selection tries H.264 hardware, software and alternative profiles, then falls back to CPU x264 through FFmpeg. `--encoder ffmpeg` forces the fallback; `--threads N` overrides its CPU-adaptive thread count. The fallback preserves the same simulation and audio timeline, but transfers raw pixels and is slower. `--encoder hardware` requires a working browser hardware configuration. JSON reports record the selected backend/configuration and failed probes. Automatic fallback handles unavailable encoders during startup; an encoder or GPU failure during export fails the command rather than restarting the match.
+The default is 1920×1080 at 60 fps with continuous stereo AAC audio. The browser encoder is tested before exporting: automatic selection tries H.264 hardware, software and alternative profiles, then falls back to CPU x264 through FFmpeg. `--encoder ffmpeg` forces the fallback; `--threads N` overrides its CPU-adaptive thread count. The fallback preserves the same simulation and audio timeline, but transfers raw pixels and is slower. `--encoder hardware` requires a working browser hardware configuration. With `--report`, the JSON report records the selected backend/configuration and failed probes. Automatic fallback handles unavailable encoders during startup; an encoder or GPU failure during export fails the command rather than restarting the match.
 
 For a smaller test add `--width 1280 --height 720`. `--software` selects software WebGL independently of the video encoder. If Chrome is installed elsewhere, pass `--chrome "C:\path\chrome.exe"` to both preparation and rendering.
 
@@ -120,7 +120,8 @@ The command writes:
 
 - `output.mp4`: the complete match.
 - `output-rounds/round-01.mp4`, etc.: rounds published as they finish.
-- `output.json`: actual elapsed time, settings, frame ranges, publication times and audio verification.
+
+Add `--report` to a command-line export to write a diagnostic JSON file with elapsed time, settings, frame ranges, publication times and audio verification.
 
 ```sh
 # Short preview, one round, or replacement of an existing export
@@ -139,7 +140,7 @@ The supplied Apple M3 Pro exported the 185.63-second, seven-round sample in **17
 
 The pipeline uses one continuous native simulation, an asynchronous ANGLE driver, one GPU pass to pack video planes, and an adaptive CPU encoding thread count. The historical benchmark used sixteen encoder threads. It avoids browser-compositor capture and full-frame CPU readback. Reserving the MP4 index up front avoids moving the completed video a second time. More independent renderers were slower on this machine and changed continuity in older experiments, so the default keeps one match timeline.
 
-The exporter checks the written master PCM hash, every round’s corresponding PCM range, and the continuous mux’s complete input hash and frame count. For a full decoded-frame audit:
+The exporter checks the written master PCM hash, every round’s corresponding PCM range, and the continuous mux’s complete input hash and frame count. Export with `--report` to run a full decoded-frame audit:
 
 ```sh
 node scripts/verify-rounds.mjs output.json
@@ -147,7 +148,7 @@ node scripts/verify-rounds.mjs output.json
 
 Visual verification also compares sampled decoded frames with the previous native renderer inputs, including countdowns and transitions. This preserves the previous quality settings and checks for frame shifts; it does not claim pixel-identical output between Chromium and native ANGLE. The native background can vary during initialization, so an additional same-run native-canvas check verifies the opening frame’s fidelity.
 
-For portable exports, decode the finished MP4 to check frame count, audio/video timestamp alignment and continuous audio coverage:
+For portable exports made with `--report`, decode the finished MP4 to check frame count, audio/video timestamp alignment and continuous audio coverage:
 
 ```sh
 node scripts/verify-av.mjs output.json

@@ -47,6 +47,7 @@ First run: npm run prepare-client -- example.ttrm (downloads client/assets once)
   --encoder MODE  auto (default), hardware, software, or ffmpeg (CPU fallback)
   --threads N     FFmpeg fallback threads (default adapts to available CPU cores)
   --direct-io     Electron: write media directly, avoiding browser transfers
+  --report        Write a JSON diagnostic report beside the MP4
   --overwrite     Replace the output file
   --help          Show usage
 `;
@@ -77,6 +78,7 @@ async function main() {
     client: { type: 'string', default: defaultClientDirectory }, chrome: { type: 'string' }, headed: { type: 'boolean' },
     'worker-rounds':{type:'string'}, 'worker-audio':{type:'string'}, 'worker-video-dir':{type:'string'},
     'worker-frames':{type:'string'},
+    report:{type:'boolean'},
     deterministic:{type:'boolean'},
     threads:{type:'string'},
     'direct-io':{type:'boolean'},
@@ -157,11 +159,13 @@ async function main() {
   const expected = (round ? [rounds[round - 1]] : rounds).reduce((sum, r) => sum + Math.max(...r.map(p => p.replay.frames)) / 60, 0);
   const maxSeconds = Math.ceil(expected + (round ? 1 : rounds.length) * 10 + 30);
   const output = path.resolve(positionals[1] || input.replace(/\.ttrm$/i, '-offline.mp4'));
-  if(options.profile&&path.resolve(options.profile)===output.replace(/\.mp4$/i,'.json'))throw Error('Profile and output report must have different paths');
   if (!/\.mp4$/i.test(output)) throw Error('Output must be an MP4.');
+  const reportFile = options.report ? output.replace(/\.mp4$/i, '.json') : null;
+  if(options.profile&&[output,reportFile].includes(path.resolve(options.profile)))throw Error('Profile must have a different path from the export files');
+  const outputFiles = reportFile ? [output, reportFile] : [output];
   const checkOutput = async () => {
     if (options.overwrite) return;
-    for (const target of [output, output.replace(/\.mp4$/i, '.json')]) {
+    for (const target of outputFiles) {
       try { await access(target); throw Error(`Output exists: ${target}. Use --overwrite.`); }
       catch (e) { if (e.code !== 'ENOENT') throw e; }
     }
@@ -456,8 +460,11 @@ async function main() {
     const elapsedSeconds = (performance.now() - wallStart) / 1000;
     const report = { input, output:selectedRounds===null?output:null, workerAudio:options['worker-audio']?path.resolve(options['worker-audio']):null, clientVersion: cache.manifest.hardVersion, networkingDisabled: true, width, height, fps, rounds:roundReports, ...result, renderSeconds, elapsedSeconds, hostTimings, speedup: result.duration / elapsedSeconds, renderSpeedup: result.duration / renderSeconds, missingAssets, clientErrors };
     report.localClientTransport=cache.transport;
-    await writeFile(output.replace(/\.mp4$/i, '.json'), JSON.stringify(report, null, 2) + '\n');
-    if(selectedRounds===null)emitRenderEvent('completed',{output,report:output.replace(/\.mp4$/i,'.json')});
+    if(reportFile)await writeFile(reportFile, JSON.stringify(report, null, 2) + '\n');
+    if(process.connected&&process.env.REPLAY_WORKER_RESULT==='1'){
+      await new Promise((resolve,reject)=>process.send({type:'render-result',report},error=>error?reject(error):resolve()));
+    }
+    if(selectedRounds===null)emitRenderEvent('completed',reportFile?{output,report:reportFile}:{output});
     if(selectedRounds!==null)console.log(`Worker finished ${result.duration.toFixed(2)}s timeline and ${result.encodedCount} selected frames in ${elapsedSeconds.toFixed(2)}s. No full video was produced by this worker.`);
     else console.log(`Saved ${output}${options['render-side']?' (diagnostic partial-board output; not a complete game export)':''}\n${result.duration.toFixed(2)}s video in ${elapsedSeconds.toFixed(2)}s total (${report.speedup.toFixed(2)}× real time; rendering ${report.renderSpeedup.toFixed(2)}×).`);
   } finally {

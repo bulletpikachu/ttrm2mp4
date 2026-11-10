@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import {mkdir,mkdtemp,readFile,stat,writeFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {mkdir,mkdtemp,readdir,readFile,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {_electron} from 'playwright-core';
 import electron from 'electron';
+import ffmpeg from 'ffmpeg-static';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const temp=await mkdtemp(path.join(tmpdir(),'replay-desktop-check-'));
 const userData=path.join(temp,'preferences');
@@ -77,17 +79,17 @@ try{
   await leftPlayer.getByText(second.username,{exact:true}).waitFor();
   assert(await swap.isDisabled());
   const events=await page.evaluate(()=>window.testEvents);
-  assert(events.some(event=>event.type==='backend'),'Structured backend selection arrives');
+  const selection=events.find(event=>event.type==='backend');
+  assert(selection,'Structured backend selection arrives');
   assert(events.some(event=>event.type==='progress'),'Structured rendering progress arrives');
   const result=events.find(event=>event.type==='finished');assert(result?.output);
   assert((await stat(result.output)).size>0,'GUI produced a video');
-  const report=JSON.parse(await readFile(result.output.replace(/\.mp4$/,'.json'),'utf8'));
-  assert(report.count>120,'Old preview length must not truncate the export');
-  assert.equal(report.networkingDisabled,true);
-  assert.equal(report.rounds.length,1);
-  assert(!report.rounds[0].partial,'The replay finishes its round');
-  if(process.argv[3]==='portable')assert(!report.pipeline.startsWith('native-'));
-  else if(process.platform==='darwin'&&process.arch==='arm64')assert.equal(report.pipeline,'native-angle-iosurface-x264');
+  await assert.rejects(stat(result.output.replace(/\.mp4$/,'.json')),{code:'ENOENT'},'GUI exports do not write a JSON report');
+  const frames=execFileSync(ffmpeg,['-v','error','-i',result.output,'-map','0:v:0','-c:v','copy','-frames:v','121','-f','framecrc','pipe:1'],{encoding:'utf8'});
+  assert.equal(frames.split('\n').filter(line=>line.startsWith('0,')).length,121,'Old preview length must not truncate the export');
+  assert.deepEqual(await readdir(result.output.replace(/\.mp4$/,'-rounds')),['round-01.mp4']);
+  if(process.argv[3]==='portable')assert.equal(selection.backend,'portable');
+  else if(process.platform==='darwin'&&process.arch==='arm64')assert.equal(selection.backend,'mac');
   const prefs=JSON.parse(await readFile(path.join(temp,'preferences/preferences.json'),'utf8'));
   assert(!Object.hasOwn(prefs,'duration'));assert.equal(prefs.backend,process.argv[3]||'auto');
   await page.screenshot({path:'/tmp/replay-render-desktop.png',fullPage:true});
@@ -109,5 +111,5 @@ try{
   assert.throws(()=>process.kill(pid,0),error=>error.code==='ESRCH','Owned rendering worker exited after cancellation');
   assert(!cancelled.some(event=>event.type==='finished'),'Cancellation never becomes completion');
   assert.equal(errors.length,0,errors.join('\n'));
-  console.log(JSON.stringify({passed:true,packaged:!!packaged,output:result.output,report:result.output.replace(/\.mp4$/,'.json'),screenshot:'/tmp/replay-render-desktop.png',temp}));
+  console.log(JSON.stringify({passed:true,packaged:!!packaged,output:result.output,screenshot:'/tmp/replay-render-desktop.png',temp}));
 }finally{if(app){const timer=setTimeout(()=>app.process().kill('SIGKILL'),5000);try{await app.close()}finally{clearTimeout(timer)}}}

@@ -15,6 +15,8 @@ try{
   assert.throws(()=>validateSettings({...settings,width:1919}),/dimensions/);
   assert.throws(()=>validateSettings({...settings,outputDirectory:'relative'}),/output folder/);
   await writeFile(path.join(output,'sample.mp4'),'existing export');
+  const oldReport=path.join(output,'sample-2.json');
+  await writeFile(oldReport,'existing report');
   const events=[],launches=[];
   const jobs=new RenderJobs({root:temp,executable:process.execPath,userData:temp,spawnWorker:(_exe,args,options)=>{
     launches.push(args);assert.equal(options.cwd,temp);assert.equal(options.env.ELECTRON_RUN_AS_NODE,'1');assert.equal(options.env.REPLAY_EVENTS,'1');
@@ -28,6 +30,7 @@ try{
   assert(!launches[0].includes('--duration'),'Desktop jobs ignore old preview lengths');
   assert.deepEqual(launches[0].slice(-2),['--appearance',appearance]);
   assert.equal(await readFile(path.join(output,'sample.mp4'),'utf8'),'existing export');
+  assert.equal(await readFile(oldReport,'utf8'),'existing report');
   assert.equal(events.find(e=>e.type==='finished').output,path.join(output,'sample-2.mp4'));
   assert(events.some(e=>e.type==='progress'));assert(events.some(e=>e.type==='done'));assert.equal(jobs.active,null);
   const failed=new RenderJobs({root:temp,executable:process.execPath,userData:temp,spawnWorker:(_exe,_args,options)=>spawn(process.execPath,['-e',"console.error('Encoder unavailable');process.exit(2)"],options)});

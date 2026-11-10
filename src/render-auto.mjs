@@ -41,6 +41,7 @@ Automatically select a prepared native backend, or the portable Chrome renderer.
   --jobs N        Drawing workers (automatic CPU/memory default, Windows native only)
   --threads N     CPU encoding threads (automatic default; Mac or portable only)
   --width N --height N --fps N --client PATH --overwrite
+  --report        Write a JSON diagnostic report beside the MP4
   --duration N / --round N use the portable path on Windows.
 Native startup is checked with a temporary short export before selecting it.
 Use npm run render-portable -- --help for all portable renderer options.`);

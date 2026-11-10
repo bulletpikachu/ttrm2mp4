@@ -30,7 +30,7 @@ async function outputPath(directory,input){
   const stem=path.basename(input).replace(/\.ttrm$/i,'');
   for(let i=0;i<1000;i++){
     const target=path.join(directory,`${stem}${i?'-'+(i+1):''}.mp4`);
-    const candidates=[target,target.replace(/\.mp4$/,'.json'),target.replace(/\.mp4$/,'-rounds')];
+    const candidates=[target,target.replace(/\.mp4$/,'-rounds')];
     const present=await Promise.all(candidates.map(file=>access(file).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;})));
     if(present.every(value=>!value))return target;
   }

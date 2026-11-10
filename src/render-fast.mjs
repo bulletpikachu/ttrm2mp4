@@ -8,7 +8,7 @@ const {values,args}=extractOptions(process.argv.slice(2),['threads']);
 const defaults=resourceDefaults(hostResources(),Number(optionValue(args,'width','1920')),Number(optionValue(args,'height','1080')));
 const threads=positiveInteger(values.threads??process.env.REPLAY_X264_THREADS??defaults.nativeThreads,'threads',32);
 if(args.includes('--help')){
-  console.log('Usage: npm run render-fast -- input.ttrm output.mp4 [--overwrite] [--duration seconds] [--threads N]\n\nOffline Apple Silicon native export at 1920×1080 / 60 fps, with continuous audio\nand each round saved as it finishes. Run prepare-client and prepare-fast once.\nMeasured full command: 185.63 seconds exported in 17.84 seconds (10.41×).\nSpeed depends on hardware, replay complexity, system load and a prepared audio cache.\nKeep inputs/assets and the output destination local for the best performance.');
+  console.log('Usage: npm run render-fast -- input.ttrm output.mp4 [--overwrite] [--duration seconds] [--threads N] [--report]\n\nOffline Apple Silicon native export at 1920×1080 / 60 fps, with continuous audio\nand each round saved as it finishes. Run prepare-client and prepare-fast once.\nMeasured full command: 185.63 seconds exported in 17.84 seconds (10.41×).\nSpeed depends on hardware, replay complexity, system load and a prepared audio cache.\nKeep inputs/assets and the output destination local for the best performance.');
 }else{
   if(process.platform!=='darwin'||process.arch!=='arm64')throw Error('render-fast currently requires Apple Silicon macOS');
   if(Number(process.versions.node.split('.')[0])<22)throw Error('render-fast requires Node.js 22 or newer');

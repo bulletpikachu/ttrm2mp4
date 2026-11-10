@@ -31,7 +31,7 @@ assert.equal((await selectBackend({...base,threadsRequested:true})).backend,'por
 await assert.rejects(selectBackend({...base,requested:'windows-nvidia',threadsRequested:true}),/uses --jobs/);
 assert.equal(resourceDefaults({cores:12,memoryBytes:512*1024**2}).nativeThreads,4);
 assert.equal(probes,2,'Unsupported/explicit-portable paths never initialize native hardware');
-const imported={...base,args:[...base.args,'--appearance','imported appearance.json']};
+const imported={...base,args:[...base.args,'--appearance','imported appearance.json','--report']};
 assert.equal((await selectBackend(imported)).backend,'windows-nvidia');
 assert.equal((await selectBackend({...imported,platform:'darwin',arch:'arm64'})).backend,'mac');
 await assert.rejects(selectBackend({...base,requested:'windows-nvidia',probe:async()=>{throw Error('Driver missing')}}),/Driver missing/);

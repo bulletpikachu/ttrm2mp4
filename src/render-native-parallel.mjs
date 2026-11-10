@@ -30,7 +30,7 @@ async function publishFile(source,target){
 async function main(){
   const start=performance.now();
   const hostTimings={};
-  const {values:o,positionals:p}=parseArgs({allowPositionals:true,options:{backend:{type:'string',default:'mac'},jobs:{type:'string'},threads:{type:'string'},width:{type:'string',default:'1920'},height:{type:'string',default:'1080'},fps:{type:'string',default:'60'},client:{type:'string',default:defaultClientDirectory},appearance:{type:'string'},'central-encoder':{type:'boolean'},'stream-audio':{type:'boolean'},'quality-inputs-only':{type:'boolean'},'quality-samples':{type:'string'},'quality-interval':{type:'string',default:'2'},overwrite:{type:'boolean'},help:{type:'boolean'}}});
+  const {values:o,positionals:p}=parseArgs({allowPositionals:true,options:{backend:{type:'string',default:'mac'},jobs:{type:'string'},threads:{type:'string'},width:{type:'string',default:'1920'},height:{type:'string',default:'1080'},fps:{type:'string',default:'60'},client:{type:'string',default:defaultClientDirectory},appearance:{type:'string'},'central-encoder':{type:'boolean'},'stream-audio':{type:'boolean'},'quality-inputs-only':{type:'boolean'},'quality-samples':{type:'string'},'quality-interval':{type:'string',default:'2'},report:{type:'boolean'},overwrite:{type:'boolean'},help:{type:'boolean'}}});
   const windows=o.backend==='windows';if(!['mac','windows'].includes(o.backend))throw Error('backend must be mac or windows');
   const mfAudio=windows&&process.env.REPLAY_WINDOWS_MF_AUDIO==='1';
   const dedicatedAudio=windows&&(mfAudio||process.env.REPLAY_DEDICATED_AUDIO==='1');
@@ -46,7 +46,7 @@ async function main(){
   if(windows)process.env.REPLAY_RESERVE_MOOV??='1';
   const profileDirectory=windows&&process.env.REPLAY_WORKER_PROFILES?path.resolve(process.env.REPLAY_WORKER_PROFILES):null;
   if(o['central-encoder'])o['stream-audio']=true;
-  if(o.help)return console.log('Usage: npm run render-native-parallel -- input.ttrm output.mp4 [--backend mac|windows] [--jobs N --threads N] [--overwrite]\nExperimental native rendering, full continuous audio, and progressive round files.\nWindows uses D3D11/NVENC with continuous audio; threads applies to Mac x264 only.\n--stream-audio: stream round PCM and reuse a renderer for the full audio reference.\nWindows REPLAY_WINDOWS_MF_AUDIO=1: use a dedicated audio leader and Media Foundation AAC.\n--central-encoder: Mac only, share one native codec scheduling queue.');
+  if(o.help)return console.log('Usage: npm run render-native-parallel -- input.ttrm output.mp4 [--backend mac|windows] [--jobs N --threads N] [--report] [--overwrite]\nExperimental native rendering, full continuous audio, and progressive round files.\nWindows uses D3D11/NVENC with continuous audio; threads applies to Mac x264 only.\n--stream-audio: stream round PCM and reuse a renderer for the full audio reference.\nWindows REPLAY_WINDOWS_MF_AUDIO=1: use a dedicated audio leader and Media Foundation AAC.\n--central-encoder: Mac only, share one native codec scheduling queue.');
   if(p.length!==2)throw Error('Provide input.ttrm and output.mp4');
   if(profileDirectory)await mkdir(profileDirectory,{recursive:true});
   const width=Number(o.width),height=Number(o.height),fps=Number(o.fps);
@@ -55,12 +55,13 @@ async function main(){
   const threads=o.threads===undefined?Math.max(1,Math.min(defaults.nativeThreads,Math.floor((resources.cores-1)/jobs))):Number(o.threads);
   if(!Number.isInteger(jobs)||jobs<1||jobs>8||!Number.isInteger(threads)||threads<1||threads>16)throw Error('jobs must be 1–8 and threads 1–16');
   if(!Number.isInteger(width)||!Number.isInteger(height)||width%2||height%2||width<2||height<2||width>3840||height>2160||!Number.isInteger(fps)||fps<1||fps>60)throw Error('Invalid video dimensions or frame rate');
-  const input=path.resolve(p[0]),output=path.resolve(p[1]),directory=output.replace(/\.mp4$/i,'-rounds'),reportFile=output.replace(/\.mp4$/i,'.json');
+  const input=path.resolve(p[0]),output=path.resolve(p[1]),directory=output.replace(/\.mp4$/i,'-rounds');
+  const reportFile=o.report?output.replace(/\.mp4$/i,'.json'):null;
   const appearance=o.appearance&&path.resolve(o.appearance);
   if(!/\.ttrm$/i.test(input)||!/\.mp4$/i.test(output))throw Error('Expected .ttrm input and .mp4 output');
   const replay=JSON.parse(await readFile(input,'utf8')),rounds=replay.replay?.rounds;
   if(!Array.isArray(rounds)||!rounds.length||rounds.some(round=>!Array.isArray(round)||round.length!==2||round.some(player=>!Number.isFinite(player.replay?.frames)||player.replay.frames<=0||!Array.isArray(player.replay.events))))throw Error('Expected complete two-player multiplayer replay data');
-  if(!o.overwrite)for(const target of [output,directory,reportFile]){try{await access(target);throw Error('Output exists: '+target)}catch(error){if(error.code!=='ENOENT')throw error}}
+  if(!o.overwrite)for(const target of reportFile?[output,directory,reportFile]:[output,directory]){try{await access(target);throw Error('Output exists: '+target)}catch(error){if(error.code!=='ENOENT')throw error}}
   await mkdir(path.dirname(output),{recursive:true});await mkdir(directory,{recursive:true});
   const temp=await mkdtemp(path.join(windows?tmpdir():path.dirname(output),windows?'replay-win-parallel-':'.replay-render-parallel-'));
   const rawDirectory=path.join(temp,'raw');await mkdir(rawDirectory);
@@ -92,16 +93,19 @@ async function main(){
     if(frameWindow)args.push('--worker-frames',JSON.stringify(frameWindow));
     if(profileDirectory)args.push('--profile',path.join(profileDirectory,name+'.json'));
     if(selection.length&&o['quality-samples'])args.push('--quality-samples',path.resolve(o['quality-samples']),'--quality-interval',o['quality-interval'],...(o['quality-inputs-only']?['--quality-inputs-only']:[]));
-    const child=spawn(process.execPath,args,{env:{...windowsEnv,...process.env,REPLAY_NATIVE_GL_TRUSTED:'1',REPLAY_X264_THREADS:String(threads),...(dedicatedAudio?{REPLAY_WORKER_PREFIX:'1',REPLAY_WORKER_VIDEO_ONLY:selection.length?'1':'0',REPLAY_EARLY_AUDIO:audio&&!selection.length?'1':'0'}:{}),...(centralSocket?{REPLAY_CENTRAL_ENCODER:centralSocket,REPLAY_CENTRAL_MACH:centralService}:{})},stdio:['ignore','pipe','pipe','ipc'],windowsHide:true});children.add(child);forwardRenderEvents(child,{worker:name});
+    const child=spawn(process.execPath,args,{env:{...windowsEnv,...process.env,REPLAY_WORKER_RESULT:'1',REPLAY_NATIVE_GL_TRUSTED:'1',REPLAY_X264_THREADS:String(threads),...(dedicatedAudio?{REPLAY_WORKER_PREFIX:'1',REPLAY_WORKER_VIDEO_ONLY:selection.length?'1':'0',REPLAY_EARLY_AUDIO:audio&&!selection.length?'1':'0'}:{}),...(centralSocket?{REPLAY_CENTRAL_ENCODER:centralSocket,REPLAY_CENTRAL_MACH:centralService}:{})},stdio:['ignore','pipe','pipe','ipc'],windowsHide:true});children.add(child);forwardRenderEvents(child,{worker:name});
     let log='';const record=data=>{log=(log+data).slice(-12000)};child.stdout.on('data',record);child.stderr.on('data',record);
+    let result;
     child.on('message',message=>{
+      if(message.type==='render-result'){result=message.report;return;}
       if(message.type==='audio-ready'&&dedicatedAudio&&audio&&!selection.length){resolveEarlyAudio(message.report);return;}
       if(message.type!==(frameWindow?'video-fragment':dedicatedAudio?'video-round':'round'))return;
       const publication=(frameWindow?acceptFragment(message.report,frameWindow):publish(message.report)).catch(error=>{failure??=error;stop()});publications.push(publication);
     });
     const task=(async()=>{
-      const [code]=await once(child,'exit');children.delete(child);if(code!==0)throw Error(`${name} failed (${code}): ${log}`);
-      return JSON.parse(await readFile(stem+'.json','utf8'));
+      const [code]=await once(child,'close');children.delete(child);if(code!==0)throw Error(`${name} failed (${code}): ${log}`);
+      if(!result)throw Error(`${name} did not send a render result`);
+      return result;
     })();tasks.push(task);return task;
   }
   let leaderReady,audioTask=null,masterAudioPackets=null;
@@ -274,8 +278,8 @@ async function main(){
       report.workers.forEach((worker,i)=>{worker.localClientTransport=workerReports[i].localClientTransport;});
       if(process.env.REPLAY_WINDOWS_NATIVE_CLIENT==='1'&&(leader.localClientTransport!=='electron-protocol'||workerReports.some(worker=>worker.localClientTransport!=='electron-protocol')))throw Error('Requested Electron client transport was not used by every worker');
     }
-    emitRenderEvent('completed',{output,report:reportFile});
-    await writeFile(reportFile,JSON.stringify(report,null,2)+'\n');
+    if(reportFile)await writeFile(reportFile,JSON.stringify(report,null,2)+'\n');
+    emitRenderEvent('completed',reportFile?{output,report:reportFile}:{output});
     console.log(`Saved ${output}\n${duration.toFixed(2)}s video in ${elapsedSeconds.toFixed(2)}s total (${report.speedup.toFixed(2)}× real time).`);
   }catch(error){console.error('Parallel export failed: '+error.message);throw error}finally{
     closingCentral=true;stop();await Promise.allSettled(tasks);await Promise.allSettled(publications);await Promise.all(stopTasks);await continuousAudio?.close();await continuousMux?.close();await videoMux?.close();await centralExit?.catch(()=>{});
